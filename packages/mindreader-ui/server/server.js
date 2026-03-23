@@ -1124,7 +1124,7 @@ except Exception:
       let params = {};
 
       if (q) {
-        whereClauses.push("(toLower(e.name) CONTAINS toLower($q) OR toLower(e.summary) CONTAINS toLower($q))");
+        whereClauses.push("(toLower(e.name) CONTAINS toLower($q) OR toLower(e.summary) CONTAINS toLower($q) OR ANY(t IN COALESCE(e.tags, []) WHERE t CONTAINS toLower($q)))");
         params.q = q;
       }
 
@@ -1136,7 +1136,8 @@ except Exception:
             CASE WHEN toLower(e.name) = toLower($q) THEN 0
                  WHEN toLower(e.name) STARTS WITH toLower($q) THEN 1
                  WHEN toLower(e.name) CONTAINS toLower($q) THEN 2
-                 ELSE 3 END ASC,
+                 WHEN ANY(t IN COALESCE(e.tags, []) WHERE t = toLower($q)) THEN 3
+                 ELSE 4 END ASC,
             relCount DESC, e.${safeSort} ${safeOrder}`
         : `ORDER BY e.${safeSort} ${safeOrder}`;
 
@@ -1146,7 +1147,7 @@ except Exception:
         OPTIONAL MATCH (e)-[r:RELATES_TO]-()
         WITH e, count(r) AS relCount
         RETURN e.uuid AS uuid, e.name AS name, e.summary AS summary,
-               e.created_at AS created_at, e.category AS category, e.node_type AS node_type, relCount
+               e.created_at AS created_at, e.category AS category, e.node_type AS node_type, e.tags AS tags, relCount
         ${orderClause}
       `;
 
@@ -1160,6 +1161,7 @@ except Exception:
         created_at: rec.created_at,
         category: categorizeEntity(rec.name, rec.summary, rec.category),
         node_type: rec.node_type || "normal",
+        tags: Array.isArray(rec.tags) ? rec.tags : [],
         relCount: typeof rec.relCount === "object" ? rec.relCount.toNumber?.() || 0 : rec.relCount || 0,
       }));
 
