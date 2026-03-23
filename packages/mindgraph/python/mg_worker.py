@@ -4,8 +4,6 @@ Memory Graph Background Worker
 
 Processes memory additions asynchronously to improve response time.
 Run as: python mg_worker.py
-
-Queue: ~/.openclaw/memory-graphiti/queue/
 """
 
 import asyncio
@@ -17,7 +15,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
-load_dotenv()
+
+# Walk up from script location to find monorepo root .env
+_script_dir = Path(__file__).resolve().parent
+_monorepo_root = _script_dir.parent.parent.parent  # python/ → mindgraph/ → packages/ → root
+_env_path = os.getenv("MINDREADER_ROOT", str(_monorepo_root))
+load_dotenv(Path(_env_path) / ".env")
 
 from shared import make_graphiti, CACHE_FILE, QUEUE_DIR
 

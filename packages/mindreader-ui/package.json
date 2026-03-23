@@ -4,8 +4,8 @@
   "type": "module",
   "main": "server/index.js",
   "scripts": {
-    "start": "node server/index.js",
-    "dev": "concurrently \"node server/index.js\" \"npm run dev --prefix ui\"",
+    "start": "node server/start.js",
+    "dev": "concurrently \"node server/start.js\" \"npm run dev --prefix ui\"",
     "build": "npm run build --prefix ui"
   },
   "dependencies": {

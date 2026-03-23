@@ -1,5 +1,5 @@
 """
-Memory Graph CLI — lightweight interface for OpenClaw agents.
+Memory Graph CLI — lightweight interface for MindReader.
 With async queue processing and duplicate caching.
 
 Usage:
@@ -634,19 +634,22 @@ Return ONLY a JSON array: [{{"idx": 0, "category": "person"}}, ...]"""
     try:
         from openai import OpenAI
         client = OpenAI(
-            api_key=os.getenv("LLM_API_KEY") or os.getenv("DASHSCOPE_API_KEY"),
-            base_url=os.getenv("LLM_BASE_URL", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
+            api_key=os.getenv("LLM_API_KEY"),
+            base_url=os.getenv("LLM_BASE_URL"),
         )
-        model = os.getenv("MG_MODEL") or os.getenv("LLM_EXTRACT_MODEL", "qwen3.5-flash")
+        model = os.getenv("MG_MODEL") or os.getenv("LLM_EXTRACT_MODEL") or os.getenv("LLM_MODEL", "gpt-4o-mini")
 
-        resp = client.chat.completions.create(
+        kwargs = dict(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.1,
             max_tokens=2000,
             response_format={"type": "json_object"},
-            extra_body={"enable_thinking": False},
         )
+        base_url = os.getenv("LLM_BASE_URL", "")
+        if "dashscope" in base_url:
+            kwargs["extra_body"] = {"enable_thinking": False}
+        resp = client.chat.completions.create(**kwargs)
         text = resp.choices[0].message.content.strip()
         data = json.loads(text)
         if isinstance(data, dict):

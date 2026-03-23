@@ -50,6 +50,9 @@ class LLMClient(BaseOpenAIClient):
         else:
             self.client = client
 
+        # DashScope-specific: disable thinking mode in Qwen models
+        self._is_dashscope = config.base_url and "dashscope" in config.base_url
+
     def _schema_to_prompt(self, response_model: type[BaseModel]) -> str:
         """Convert a Pydantic model to a JSON schema instruction for the prompt."""
         schema = response_model.model_json_schema()
@@ -92,14 +95,17 @@ class LLMClient(BaseOpenAIClient):
                 "content": "You are a helpful assistant." + schema_instruction,
             })
 
-        response = await self.client.chat.completions.create(
+        kwargs = dict(
             model=model,
             messages=augmented_messages,
             temperature=temperature,
             max_tokens=max_tokens,
             response_format={"type": "json_object"},
-            extra_body={"enable_thinking": False},
         )
+        if self._is_dashscope:
+            kwargs["extra_body"] = {"enable_thinking": False}
+
+        response = await self.client.chat.completions.create(**kwargs)
 
         return _StructuredResponse(response, response_model)
 
@@ -112,14 +118,17 @@ class LLMClient(BaseOpenAIClient):
         response_model: type[BaseModel] | None = None,
     ):
         """Create a regular completion with JSON format."""
-        return await self.client.chat.completions.create(
+        kwargs = dict(
             model=model,
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
             response_format={"type": "json_object"},
-            extra_body={"enable_thinking": False},
         )
+        if self._is_dashscope:
+            kwargs["extra_body"] = {"enable_thinking": False}
+
+        return await self.client.chat.completions.create(**kwargs)
 
 
 class _StructuredResponse:

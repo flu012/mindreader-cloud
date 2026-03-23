@@ -1,13 +1,5 @@
 /**
- * MindReader server entry point.
- * Loads config and starts the HTTP server.
+ * MindReader UI package entry point.
+ * Re-exports startServer/createServer for programmatic use (e.g. OpenClaw plugin).
  */
-import { startServer } from "./server.js";
-
-const logger = {
-  info: (...args) => console.log("[info]", ...args),
-  warn: (...args) => console.warn("[warn]", ...args),
-  error: (...args) => console.error("[error]", ...args),
-};
-
-startServer({}, logger);
+export { startServer, createServer } from "./server.js";

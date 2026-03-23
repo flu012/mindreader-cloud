@@ -280,8 +280,13 @@ step_llm() {
         3|*)
             EMBEDDER_PROVIDER="$LLM_PROVIDER"
             EMBEDDER_BASE_URL="$LLM_BASE_URL"
-            EMBEDDER_DEFAULT_MODEL="${LLM_DEFAULT_MODEL/gpt-4o-mini/text-embedding-3-small}"
             EMBEDDER_API_KEY="$LLM_API_KEY"
+            # Map provider to its default embedding model
+            case "$EMBEDDER_PROVIDER" in
+                openai)    EMBEDDER_DEFAULT_MODEL="text-embedding-3-small" ;;
+                dashscope) EMBEDDER_DEFAULT_MODEL="text-embedding-v4" ;;
+                *)         EMBEDDER_DEFAULT_MODEL="text-embedding-3-small" ;;
+            esac
             info "Using same provider as LLM: ${EMBEDDER_PROVIDER}"
             ;;
     esac
@@ -304,14 +309,17 @@ verify_neo4j() {
         fi
     fi
 
-    # Fallback: try via Node.js
+    # Fallback: try via Node.js (only if neo4j-driver is installed)
     if [[ "$ok" == "false" ]] && command -v node &>/dev/null; then
-        if node -e "
-const neo4j = require('neo4j-driver');
+        local neo4j_mod="$SCRIPT_DIR/../node_modules/neo4j-driver"
+        if [[ -d "$neo4j_mod" ]]; then
+            if node --input-type=module -e "
+import neo4j from 'neo4j-driver';
 const driver = neo4j.driver('$NEO4J_URI', neo4j.auth.basic('$NEO4J_USER', '$NEO4J_PASSWORD'));
 driver.verifyConnectivity().then(() => { console.log('OK'); process.exit(0); }).catch(() => process.exit(1));
 " 2>/dev/null; then
-            ok=true
+                ok=true
+            fi
         fi
     fi
 

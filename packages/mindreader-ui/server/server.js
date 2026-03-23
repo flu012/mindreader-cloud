@@ -279,7 +279,7 @@ client = OpenAI(api_key=os.getenv("LLM_API_KEY"), base_url=os.getenv("LLM_BASE_U
 with open(os.getenv("MG_PROMPT_FILE")) as f:
     prompt = json.load(f)
 resp = client.chat.completions.create(
-    model=os.getenv("MG_MODEL", "qwen3.5-flash"),
+    model=os.getenv("MG_MODEL", "gpt-4o-mini"),
     messages=[{"role": "user", "content": prompt}],
     temperature=0.3,
     max_tokens=400,
@@ -994,7 +994,7 @@ client = OpenAI(api_key=os.getenv("LLM_API_KEY"), base_url=os.getenv("LLM_BASE_U
 with open(os.getenv("MG_PROMPT_FILE")) as f:
     prompt = json.load(f)
 resp = client.chat.completions.create(
-    model=os.getenv("MG_MODEL", "qwen3.5-flash"),
+    model=os.getenv("MG_MODEL", "gpt-4o-mini"),
     messages=[{"role": "user", "content": prompt}],
     temperature=0.1,
     max_tokens=2000,
@@ -1646,7 +1646,7 @@ client = OpenAI(api_key=os.getenv("LLM_API_KEY"), base_url=os.getenv("LLM_BASE_U
 with open(os.getenv("MG_PROMPT_FILE")) as f:
     prompt = json.load(f)
 resp = client.chat.completions.create(
-    model=os.getenv("MG_MODEL", "qwen3.5-flash"),
+    model=os.getenv("MG_MODEL", "gpt-4o-mini"),
     messages=[{"role": "user", "content": prompt}],
     temperature=0.1,
     max_tokens=2000,
@@ -2311,7 +2311,7 @@ client = OpenAI(api_key=os.getenv("LLM_API_KEY"), base_url=os.getenv("LLM_BASE_U
 with open(os.getenv("MG_PROMPT_FILE")) as f:
     prompt = json.load(f)
 resp = client.chat.completions.create(
-    model=os.getenv("MG_MODEL", "qwen3.5-flash"),
+    model=os.getenv("MG_MODEL", "gpt-4o-mini"),
     messages=[{"role": "user", "content": prompt}],
     temperature=0.1,
     max_tokens=1000,

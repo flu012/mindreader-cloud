@@ -69,8 +69,9 @@ class TrackedEmbedder(OpenAIEmbedder):
 
 
 # Cache and Queue paths
-CACHE_FILE = Path(os.path.expanduser("~/.openclaw/memory-graphiti/.memory_cache.json"))
-QUEUE_DIR = Path(os.path.expanduser("~/.openclaw/memory-graphiti/queue"))
+_cache_base = Path(os.getenv("MINDREADER_CACHE", os.path.expanduser("~/.mindreader/cache")))
+CACHE_FILE = _cache_base / ".memory_cache.json"
+QUEUE_DIR = _cache_base / "queue"
 
 
 def validate_env():
@@ -93,8 +94,8 @@ def validate_env():
 def make_graphiti():
     validate_env()
 
-    extract_model = os.getenv("LLM_EXTRACT_MODEL", os.getenv("LLM_MODEL", "qwen3.5-flash"))
-    base_model = os.getenv("LLM_MODEL", "qwen3.5-plus")
+    extract_model = os.getenv("LLM_EXTRACT_MODEL", os.getenv("LLM_MODEL", "gpt-4o-mini"))
+    base_model = os.getenv("LLM_MODEL", "gpt-4o-mini")
 
     llm_config = LLMConfig(
         api_key=os.getenv("LLM_API_KEY"),

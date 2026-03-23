@@ -3,7 +3,7 @@
   "kind": "memory",
   "name": "MindReader — Knowledge Graph Memory",
   "description": "Knowledge graph memory with auto-recall, auto-capture, and interactive graph explorer.",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -24,33 +24,33 @@
       },
       "llmApiKey": {
         "type": "string",
-        "description": "LLM API key (Aliyun DashScope or OpenAI compatible)",
+        "description": "LLM API key (OpenAI, DashScope, or compatible)",
         "default": ""
       },
       "llmBaseUrl": {
         "type": "string",
         "description": "LLM base URL",
-        "default": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        "default": "https://api.openai.com/v1"
       },
       "llmModel": {
         "type": "string",
         "description": "LLM model for entity extraction",
-        "default": "qwen3.5-plus"
+        "default": "gpt-4o-mini"
       },
       "embedderApiKey": {
         "type": "string",
-        "description": "Embedder API key (Aliyun DashScope)",
+        "description": "Embedder API key",
         "default": ""
       },
       "embedderBaseUrl": {
         "type": "string",
         "description": "Embedder base URL",
-        "default": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        "default": "https://api.openai.com/v1"
       },
       "embedderModel": {
         "type": "string",
         "description": "Embedder model",
-        "default": "text-embedding-v3"
+        "default": "text-embedding-3-small"
       },
       "autoCapture": {
         "type": "boolean",
