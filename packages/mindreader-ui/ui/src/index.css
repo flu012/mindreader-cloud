@@ -1038,3 +1038,76 @@ body::after {
   .detail-panel-wrapper { position: fixed; right: 0; top: 0; bottom: 0; width: 100%; max-width: 360px; z-index: 200; }
   .project-cards { grid-template-columns: 1fr; }
 }
+
+/* Tag pills */
+.tag-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.tag-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 0.75rem;
+  background: rgba(74, 255, 255, 0.12);
+  border: 1px solid rgba(74, 255, 255, 0.25);
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.tag-pill--small {
+  font-size: 0.7rem;
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+
+.tag-pill .tag-remove {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 10px;
+  padding: 0 1px;
+  line-height: 1;
+  opacity: 0.6;
+}
+
+.tag-pill .tag-remove:hover {
+  opacity: 1;
+  color: var(--accent-red);
+}
+
+.tag-add-btn {
+  background: none;
+  border: 1px dashed rgba(74, 255, 255, 0.3);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.tag-add-btn:hover {
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+}
+
+.tag-add-input {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(74, 255, 255, 0.3);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+  outline: none;
+  width: 100px;
+}
+
+.tag-add-input:focus {
+  border-color: var(--accent-cyan);
+}
