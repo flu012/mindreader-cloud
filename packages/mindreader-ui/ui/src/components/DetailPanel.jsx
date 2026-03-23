@@ -1,0 +1,1013 @@
+import { useState, useCallback, useRef, useEffect } from "react";
+import { EntityActivityHistory } from "./ActivityLog";
+import { CATEGORY_COLORS, CATEGORY_LABELS, NODE_TYPES } from "../constants";
+
+export default function DetailPanel({ entity, relationships, onClose, onNavigate, groupColors, categoryColors, onRefresh, onEntityUpdate, onDeleteNode }) {
+  const [activeAction, setActiveAction] = useState(null); // null | "merge" | "link"
+
+  if (!entity) return null;
+
+  const outgoing = relationships.filter((r) => r.direction === "outgoing");
+  const incoming = relationships.filter((r) => r.direction === "incoming");
+
+  return (
+    <div className="detail-panel">
+      <button className="close-btn" onClick={onClose}>✕</button>
+
+      <h2>{entity.name}</h2>
+      <CategorySelector entityName={entity.name} currentCategory={entity.category || entity.group_id} onRefresh={onEntityUpdate || onRefresh} />
+      <NodeTypeSelector entityName={entity.name} currentNodeType={entity.node_type || "normal"} onRefresh={onEntityUpdate || onRefresh} />
+
+      {/* Editable summary */}
+      <EditableSummary entityName={entity.name} savedSummary={entity.summary || ""} />
+
+      {entity.created_at && (
+        <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 12 }}>
+          Created: {formatDate(entity.created_at)}
+        </div>
+      )}
+
+      {/* AI Explanation section */}
+      <ExplanationSection
+        entityName={entity.name}
+        savedExplanation={entity.explanation}
+        explanationUpdatedAt={entity.explanation_updated_at}
+      />
+
+      {outgoing.length > 0 && (
+        <>
+          <h3>→ Outgoing ({outgoing.length})</h3>
+          {outgoing.map((rel, i) => (
+            <RelationshipItem
+              key={`out-${i}`}
+              rel={rel}
+              direction="outgoing"
+              isCredential={entity.node_type === "credential"}
+              onNavigate={onNavigate}
+            />
+          ))}
+        </>
+      )}
+
+      {incoming.length > 0 && (
+        <>
+          <h3>← Incoming ({incoming.length})</h3>
+          {incoming.map((rel, i) => (
+            <RelationshipItem
+              key={`in-${i}`}
+              rel={rel}
+              direction="incoming"
+              isCredential={rel.other?.node_type === "credential"}
+              onNavigate={onNavigate}
+            />
+          ))}
+        </>
+      )}
+
+      {outgoing.length === 0 && incoming.length === 0 && (
+        <div style={{ color: "var(--text-secondary)", fontSize: 13, marginTop: 16 }}>
+          No relationships found.
+        </div>
+      )}
+
+      <EntityActivityHistory entityName={entity.name} />
+
+      {/* Merge / Link actions */}
+      <div style={{ marginTop: 16, display: "flex", gap: 8 }}>
+        <button
+          onClick={() => setActiveAction(activeAction === "link" ? null : "link")}
+          style={{
+            flex: 1, padding: "8px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600,
+            cursor: "pointer", transition: "all 0.2s",
+            background: activeAction === "link" ? "rgba(74,255,120,0.15)" : "transparent",
+            border: `1px solid ${activeAction === "link" ? "rgba(74,255,120,0.4)" : "rgba(255,255,255,0.1)"}`,
+            color: activeAction === "link" ? "#66dd88" : "var(--text-secondary)",
+          }}
+        >🔗 Link to...</button>
+        <button
+          onClick={() => setActiveAction(activeAction === "merge" ? null : "merge")}
+          style={{
+            flex: 1, padding: "8px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600,
+            cursor: "pointer", transition: "all 0.2s",
+            background: activeAction === "merge" ? "rgba(255,165,0,0.15)" : "transparent",
+            border: `1px solid ${activeAction === "merge" ? "rgba(255,165,0,0.4)" : "rgba(255,255,255,0.1)"}`,
+            color: activeAction === "merge" ? "#ffaa44" : "var(--text-secondary)",
+          }}
+        >🔀 Merge with...</button>
+        <button
+          onClick={() => setActiveAction(activeAction === "delete" ? null : "delete")}
+          style={{
+            padding: "8px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600,
+            cursor: "pointer", transition: "all 0.2s",
+            background: activeAction === "delete" ? "rgba(255,74,74,0.15)" : "transparent",
+            border: `1px solid ${activeAction === "delete" ? "rgba(255,74,74,0.4)" : "rgba(255,255,255,0.1)"}`,
+            color: activeAction === "delete" ? "#ff4a4a" : "var(--text-secondary)",
+          }}
+        >🗑️</button>
+      </div>
+
+      {activeAction === "delete" && (
+        <DeletePanel
+          entityName={entity.name}
+          onDone={() => { setActiveAction(null); if (onDeleteNode) onDeleteNode(entity.name); onClose(); }}
+          onCancel={() => setActiveAction(null)}
+        />
+      )}
+
+      {activeAction && activeAction !== "delete" && (
+        <ActionPanel
+          mode={activeAction}
+          entityName={entity.name}
+          onDone={(result) => {
+            setActiveAction(null);
+            if (onRefresh) onRefresh();
+            if (result?.kept && onNavigate) onNavigate(result.kept);
+          }}
+          onCancel={() => setActiveAction(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function EditableSummary({ entityName, savedSummary }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(savedSummary);
+  const [saving, setSaving] = useState(false);
+  const textareaRef = useRef(null);
+
+  // Reset when entity changes
+  useEffect(() => {
+    setValue(savedSummary);
+    setEditing(false);
+  }, [entityName, savedSummary]);
+
+  useEffect(() => {
+    if (editing && textareaRef.current) {
+      textareaRef.current.focus();
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = textareaRef.current.scrollHeight + "px";
+    }
+  }, [editing]);
+
+  const handleSave = useCallback(async () => {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/entity/${encodeURIComponent(entityName)}/summary`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ summary: value }),
+      });
+      if (!res.ok) throw new Error("Save failed");
+      setEditing(false);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  }, [entityName, value]);
+
+  if (editing) {
+    return (
+      <div style={{ marginBottom: 12 }}>
+        <textarea
+          ref={textareaRef}
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            e.target.style.height = "auto";
+            e.target.style.height = e.target.scrollHeight + "px";
+          }}
+          style={{
+            width: "100%",
+            minHeight: 60,
+            padding: 10,
+            background: "var(--bg-secondary)",
+            border: "1px solid rgba(74, 158, 255, 0.3)",
+            borderRadius: 8,
+            color: "var(--text-primary)",
+            fontSize: 13,
+            lineHeight: 1.5,
+            resize: "none",
+            outline: "none",
+            fontFamily: "inherit",
+            boxSizing: "border-box",
+          }}
+          placeholder="Add a summary for this entity..."
+        />
+        <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            style={{
+              padding: "4px 12px",
+              background: "var(--accent-blue)",
+              border: "none",
+              borderRadius: 6,
+              color: "#fff",
+              fontSize: 12,
+              cursor: saving ? "wait" : "pointer",
+              opacity: saving ? 0.6 : 1,
+            }}
+          >
+            {saving ? "Saving..." : "Save"}
+          </button>
+          <button
+            onClick={() => { setValue(savedSummary); setEditing(false); }}
+            style={{
+              padding: "4px 12px",
+              background: "none",
+              border: "1px solid var(--text-secondary)",
+              borderRadius: 6,
+              color: "var(--text-secondary)",
+              fontSize: 12,
+              cursor: "pointer",
+            }}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      onClick={() => setEditing(true)}
+      title="Click to edit summary"
+      style={{
+        marginBottom: 12,
+        padding: value ? "8px 10px" : "6px 10px",
+        background: value ? "transparent" : "var(--bg-secondary)",
+        borderRadius: 6,
+        cursor: "pointer",
+        fontSize: 13,
+        color: value ? "var(--text-primary)" : "var(--text-secondary)",
+        lineHeight: 1.5,
+        borderLeft: value ? "2px solid rgba(74, 158, 255, 0.3)" : "2px solid transparent",
+        transition: "all 0.2s",
+        minHeight: value ? "auto" : 28,
+        display: "flex",
+        alignItems: "center",
+      }}
+      onMouseEnter={(e) => { e.currentTarget.style.borderLeftColor = "var(--accent-blue)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.borderLeftColor = value ? "rgba(74, 158, 255, 0.3)" : "transparent"; }}
+    >
+      {value || "Click to add summary..."}
+    </div>
+  );
+}
+
+function ExplanationSection({ entityName, savedExplanation, explanationUpdatedAt }) {
+  const [explanation, setExplanation] = useState(savedExplanation || null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [meta, setMeta] = useState(null);
+
+  // Reset when entity changes
+  useEffect(() => {
+    setExplanation(savedExplanation || null);
+    setMeta(null);
+    setError(null);
+    setLoading(false);
+  }, [entityName, savedExplanation]);
+
+  const handleAnalyze = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/entity/${encodeURIComponent(entityName)}/summarize`);
+      if (!res.ok) throw new Error("Analysis failed");
+      const data = await res.json();
+      setExplanation(data.explanation);
+      setMeta({ connected: data.connectedCount, relationships: data.relationshipCount });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [entityName]);
+
+  const hasExplanation = explanation && explanation.length > 0;
+
+  return (
+    <div style={{ marginBottom: 16 }}>
+      {!hasExplanation && !loading && !error && (
+        <button
+          onClick={handleAnalyze}
+          style={{
+            width: "100%",
+            padding: "10px 16px",
+            background: "linear-gradient(135deg, rgba(74, 158, 255, 0.15), rgba(158, 74, 255, 0.15))",
+            border: "1px solid rgba(74, 158, 255, 0.3)",
+            borderRadius: 8,
+            color: "var(--accent-blue)",
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+            transition: "all 0.2s",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "linear-gradient(135deg, rgba(74, 158, 255, 0.25), rgba(158, 74, 255, 0.25))";
+            e.currentTarget.style.borderColor = "rgba(74, 158, 255, 0.5)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "linear-gradient(135deg, rgba(74, 158, 255, 0.15), rgba(158, 74, 255, 0.15))";
+            e.currentTarget.style.borderColor = "rgba(74, 158, 255, 0.3)";
+          }}
+        >
+          ✨ Analyze Entity
+        </button>
+      )}
+
+      {loading && (
+        <div style={{
+          padding: 16,
+          textAlign: "center",
+          color: "var(--text-secondary)",
+          fontSize: 13,
+          background: "var(--bg-secondary)",
+          borderRadius: 8,
+        }}>
+          <div className="loading-spinner" style={{ width: 20, height: 20, margin: "0 auto 8px" }} />
+          Analyzing connections...
+        </div>
+      )}
+
+      {error && (
+        <div style={{
+          padding: 12,
+          background: "rgba(255, 74, 74, 0.1)",
+          border: "1px solid var(--accent-red)",
+          borderRadius: 8,
+          color: "var(--accent-red)",
+          fontSize: 13,
+        }}>
+          {error}
+          <button
+            onClick={handleAnalyze}
+            style={{
+              marginLeft: 8,
+              background: "none",
+              border: "none",
+              color: "var(--accent-blue)",
+              cursor: "pointer",
+              fontSize: 12,
+              textDecoration: "underline",
+            }}
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {hasExplanation && !loading && (
+        <div style={{
+          padding: 14,
+          background: "linear-gradient(135deg, rgba(74, 158, 255, 0.08), rgba(158, 74, 255, 0.08))",
+          border: "1px solid rgba(74, 158, 255, 0.15)",
+          borderRadius: 8,
+        }}>
+          <div style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 10,
+          }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--accent-blue)" }}>
+              ✨ AI Explanation
+            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              {meta && (
+                <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>
+                  {meta.connected} entities • {meta.relationships} rels
+                </span>
+              )}
+              {explanationUpdatedAt && !meta && (
+                <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>
+                  {formatDate(explanationUpdatedAt)}
+                </span>
+              )}
+              <button
+                onClick={handleAnalyze}
+                title="Refresh explanation"
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "var(--text-secondary)",
+                  cursor: "pointer",
+                  fontSize: 14,
+                  padding: "2px 4px",
+                  borderRadius: 4,
+                  transition: "color 0.2s",
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = "var(--accent-blue)"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-secondary)"; }}
+              >
+                🔄
+              </button>
+            </div>
+          </div>
+          <div style={{
+            fontSize: 13,
+            lineHeight: 1.6,
+            color: "var(--text-primary)",
+          }}>
+            {explanation}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DeletePanel({ entityName, onDone, onCancel }) {
+  const [preview, setPreview] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    fetch(`/api/entity/${encodeURIComponent(entityName)}/delete-preview`)
+      .then(r => r.json())
+      .then(data => { setPreview(data); setLoading(false); })
+      .catch(err => { setError(err.message); setLoading(false); });
+  }, [entityName]);
+
+  const handleDelete = useCallback(async () => {
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/entity/${encodeURIComponent(entityName)}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json()).error || "Delete failed");
+      onDone();
+    } catch (err) {
+      setError(err.message);
+      setDeleting(false);
+    }
+  }, [entityName, onDone]);
+
+  return (
+    <div style={{
+      marginTop: 12, padding: 14,
+      background: "rgba(255,74,74,0.08)", border: "1px solid rgba(255,74,74,0.25)",
+      borderRadius: 10,
+    }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: "#ff4a4a", marginBottom: 10 }}>
+        🗑️ Delete "{entityName}"
+      </div>
+
+      {error && <div style={{ fontSize: 12, color: "#ff4a4a", marginBottom: 8 }}>{error}</div>}
+
+      {loading && <div style={{ fontSize: 12, color: "var(--text-secondary)" }}>Loading preview...</div>}
+
+      {preview && (
+        <>
+          <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 8 }}>
+            This will permanently delete this entity and remove:
+          </div>
+
+          {preview.relationships.length > 0 && (
+            <div style={{
+              maxHeight: 150, overflowY: "auto", marginBottom: 10,
+              background: "rgba(0,0,0,0.2)", borderRadius: 6, padding: 8,
+            }}>
+              {preview.relationships.map((r, i) => (
+                <div key={i} style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 4 }}>
+                  <span style={{ color: "#ff8888" }}>{r.direction === "outgoing" ? "→" : "←"}</span>
+                  {" "}
+                  <span style={{ color: "var(--text-primary)" }}>[{r.relation}]</span>
+                  {" "}
+                  {r.otherName}
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 12 }}>
+            <strong>{preview.relationships.length}</strong> relationship{preview.relationships.length !== 1 ? "s" : ""}
+            {preview.episodicLinks > 0 && <> · <strong>{preview.episodicLinks}</strong> episodic link{preview.episodicLinks !== 1 ? "s" : ""}</>}
+            {" will be removed."}
+          </div>
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={handleDelete} disabled={deleting} style={{
+              flex: 1, padding: "8px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600,
+              cursor: deleting ? "wait" : "pointer", opacity: deleting ? 0.6 : 1,
+              background: "rgba(255,74,74,0.2)", border: "1px solid rgba(255,74,74,0.5)",
+              color: "#ff4a4a",
+            }}>
+              {deleting ? "Deleting..." : "Confirm Delete"}
+            </button>
+            <button onClick={onCancel} style={{
+              padding: "8px 12px", borderRadius: 8, fontSize: 12,
+              background: "transparent", border: "1px solid rgba(255,255,255,0.1)",
+              color: "var(--text-secondary)", cursor: "pointer",
+            }}>Cancel</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function RelationshipItem({ rel, direction, isCredential, onNavigate }) {
+  const [revealed, setRevealed] = useState(false);
+
+  if (direction === "outgoing") {
+    return (
+      <div className="relationship-item" onClick={() => onNavigate(rel.other.name)}>
+        <div>
+          <span className="relationship-label">{rel._type || "RELATES_TO"}</span>
+          {" → "}
+          <span className="relationship-target">{rel.other.name}</span>
+        </div>
+        {rel.fact && (
+          <div
+            className="relationship-fact"
+            onClick={isCredential ? (e) => { e.stopPropagation(); setRevealed(!revealed); } : undefined}
+            style={isCredential ? { cursor: "pointer", userSelect: "none" } : {}}
+          >
+            {isCredential && !revealed ? "••••••" : rel.fact}
+            {isCredential && (
+              <span style={{ marginLeft: 6, fontSize: 10, color: "var(--text-secondary)" }}>
+                {revealed ? "🔓" : "🔒"}
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="relationship-item" onClick={() => onNavigate(rel.other.name)}>
+      <div>
+        <span className="relationship-target">{rel.other.name}</span>
+        {" → "}
+        <span className="relationship-label">{rel._type || "RELATES_TO"}</span>
+      </div>
+      {rel.fact && (
+        <div
+          className="relationship-fact"
+          onClick={isCredential ? (e) => { e.stopPropagation(); setRevealed(!revealed); } : undefined}
+          style={isCredential ? { cursor: "pointer", userSelect: "none" } : {}}
+        >
+          {isCredential && !revealed ? "••••••" : rel.fact}
+          {isCredential && (
+            <span style={{ marginLeft: 6, fontSize: 10, color: "var(--text-secondary)" }}>
+              {revealed ? "🔓" : "🔒"}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CategorySelector({ entityName, currentCategory, onRefresh }) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [dynamicCategories, setDynamicCategories] = useState(null);
+  const dropdownRef = useRef(null);
+
+  // Fetch categories from API on first open
+  useEffect(() => {
+    if (!open || dynamicCategories) return;
+    fetch("/api/categories")
+      .then(r => r.json())
+      .then(cats => { if (Array.isArray(cats)) setDynamicCategories(cats); })
+      .catch(() => {});
+  }, [open, dynamicCategories]);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    if (!open) return;
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  const handleSelect = useCallback(async (categoryKey) => {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/entity/${encodeURIComponent(entityName)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category: categoryKey || "" }),
+      });
+      if (res.ok) {
+        setOpen(false);
+        if (onRefresh) onRefresh();
+      }
+    } catch { /* skip */ }
+    finally { setSaving(false); }
+  }, [entityName, onRefresh]);
+
+  const categoryEntries = [
+    { key: "", label: "Auto-detect", color: "#888" },
+    ...(dynamicCategories
+      ? dynamicCategories.map(c => ({ key: c.key, label: c.label, color: c.color || "#888" }))
+      : Object.entries(CATEGORY_LABELS).map(([key, label]) => ({ key, label, color: CATEGORY_COLORS[key] || "#888" }))
+    ),
+  ];
+
+  const current = categoryEntries.find(g => g.key === (currentCategory || "")) || categoryEntries[0];
+
+  return (
+    <div ref={dropdownRef} style={{ position: "relative", marginBottom: 10 }}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{
+          display: "inline-flex", alignItems: "center", gap: 6,
+          padding: "3px 10px", borderRadius: 12, fontSize: 11, fontWeight: 600,
+          cursor: "pointer", transition: "all 0.2s",
+          background: `${current.color}20`,
+          border: `1px solid ${current.color}40`,
+          color: current.color,
+        }}
+      >
+        <span style={{
+          width: 8, height: 8, borderRadius: "50%",
+          background: current.color, display: "inline-block",
+        }} />
+        {current.label}
+        <span style={{ fontSize: 9 }}>{open ? "▲" : "▼"}</span>
+      </button>
+
+      {open && (
+        <div style={{
+          position: "absolute", top: "100%", left: 0, zIndex: 30,
+          marginTop: 4, background: "var(--bg-secondary)",
+          border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8,
+          boxShadow: "0 4px 16px rgba(0,0,0,0.4)", minWidth: 150,
+          overflow: "hidden",
+        }}>
+          {categoryEntries.map(({ key, label, color }) => (
+            <div
+              key={key}
+              onClick={() => !saving && handleSelect(key)}
+              style={{
+                padding: "8px 12px", cursor: saving ? "wait" : "pointer",
+                fontSize: 12, display: "flex", alignItems: "center", gap: 8,
+                background: key === (currentCategory || "") ? "rgba(74,158,255,0.1)" : "transparent",
+                borderBottom: "1px solid rgba(255,255,255,0.03)",
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = "rgba(74,158,255,0.1)"}
+              onMouseLeave={(e) => e.currentTarget.style.background = key === (currentCategory || "") ? "rgba(74,158,255,0.1)" : "transparent"}
+            >
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: color }} />
+              {label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NodeTypeSelector({ entityName, currentNodeType, onRefresh }) {
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const dropdownRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  const handleSelect = useCallback(async (nodeType) => {
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/entity/${encodeURIComponent(entityName)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ node_type: nodeType }),
+      });
+      if (res.ok) {
+        setOpen(false);
+        if (onRefresh) onRefresh();
+      }
+    } catch { /* skip */ }
+    finally { setSaving(false); }
+  }, [entityName, onRefresh]);
+
+  const current = NODE_TYPES[currentNodeType] || NODE_TYPES.normal;
+  const typeColor = currentNodeType === "credential" ? "#ff9e4a" : currentNodeType === "archived" ? "#8888aa" : "#4a9eff";
+
+  return (
+    <div ref={dropdownRef} style={{ position: "relative", marginBottom: 10, display: "inline-block" }}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{
+          display: "inline-flex", alignItems: "center", gap: 5,
+          padding: "3px 10px", borderRadius: 12, fontSize: 11, fontWeight: 600,
+          cursor: "pointer", transition: "all 0.2s",
+          background: `${typeColor}20`,
+          border: `1px solid ${typeColor}40`,
+          color: typeColor,
+        }}
+      >
+        {current.icon} {current.label}
+        <span style={{ fontSize: 9 }}>{open ? "▲" : "▼"}</span>
+      </button>
+
+      {open && (
+        <div style={{
+          position: "absolute", top: "100%", left: 0, zIndex: 30,
+          marginTop: 4, background: "var(--bg-secondary)",
+          border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8,
+          boxShadow: "0 4px 16px rgba(0,0,0,0.4)", minWidth: 140,
+          overflow: "hidden",
+        }}>
+          {Object.entries(NODE_TYPES).map(([key, { label, icon }]) => {
+            const color = key === "credential" ? "#ff9e4a" : key === "archived" ? "#8888aa" : "#4a9eff";
+            return (
+              <div
+                key={key}
+                onClick={() => !saving && handleSelect(key)}
+                style={{
+                  padding: "8px 12px", cursor: saving ? "wait" : "pointer",
+                  fontSize: 12, display: "flex", alignItems: "center", gap: 8,
+                  background: key === currentNodeType ? "rgba(74,158,255,0.1)" : "transparent",
+                  borderBottom: "1px solid rgba(255,255,255,0.03)",
+                  color: key === currentNodeType ? color : "var(--text-primary)",
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = "rgba(74,158,255,0.1)"}
+                onMouseLeave={(e) => e.currentTarget.style.background = key === currentNodeType ? "rgba(74,158,255,0.1)" : "transparent"}
+              >
+                {icon} {label}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ActionPanel({ mode, entityName, onDone, onCancel }) {
+  const [search, setSearch] = useState("");
+  const [results, setResults] = useState([]);
+  const [target, setTarget] = useState(null);
+  const [relationName, setRelationName] = useState("");
+  const [fact, setFact] = useState("");
+  const [keepName, setKeepName] = useState("target");
+  const [summary, setSummary] = useState("");
+  const [executing, setExecuting] = useState(false);
+  const [error, setError] = useState(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  useEffect(() => {
+    if (search.length < 2) { setResults([]); return; }
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/entities?q=${encodeURIComponent(search)}&limit=8`);
+        if (res.ok) {
+          const data = await res.json();
+          setResults((data.entities || []).filter(e => e.name !== entityName));
+        }
+      } catch { setResults([]); }
+    }, 200);
+    return () => clearTimeout(t);
+  }, [search, entityName]);
+
+  const selectTarget = useCallback(async (entity) => {
+    try {
+      const res = await fetch(`/api/entity/${encodeURIComponent(entity.name)}`);
+      if (res.ok) {
+        const data = await res.json();
+        setTarget(data);
+        setSearch("");
+        setResults([]);
+        if (mode === "merge") setSummary(data.entity?.summary || "");
+      }
+    } catch { /* skip */ }
+  }, [mode]);
+
+  const handleExecute = useCallback(async () => {
+    if (!target) return;
+    setExecuting(true);
+    setError(null);
+    try {
+      if (mode === "link") {
+        if (!relationName.trim()) { setError("Relation name required"); setExecuting(false); return; }
+        const res = await fetch("/api/link", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sourceName: entityName,
+            targetName: target.entity.name,
+            relationName: relationName.toUpperCase().replace(/\s+/g, "_"),
+            fact: fact || undefined,
+          }),
+        });
+        if (!res.ok) throw new Error((await res.json()).error || "Link failed");
+        onDone({ kept: entityName });
+      } else {
+        const keep = keepName === "current" ? entityName : target.entity.name;
+        const merge = keepName === "current" ? target.entity.name : entityName;
+        const res = await fetch("/api/merge", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            keepName: keep,
+            mergeName: merge,
+            newSummary: summary || undefined,
+          }),
+        });
+        if (!res.ok) throw new Error((await res.json()).error || "Merge failed");
+        const data = await res.json();
+        onDone(data);
+      }
+    } catch (err) {
+      setError(err.message);
+      setExecuting(false);
+    }
+  }, [mode, target, entityName, relationName, fact, keepName, summary, onDone]);
+
+  const isLink = mode === "link";
+  const accent = isLink ? "#66dd88" : "#ffaa44";
+  const accentBg = isLink ? "rgba(74,255,120,0.1)" : "rgba(255,165,0,0.1)";
+
+  return (
+    <div style={{
+      marginTop: 12, padding: 14, background: accentBg,
+      border: `1px solid ${accent}33`, borderRadius: 10,
+    }}>
+      <div style={{ fontSize: 12, fontWeight: 600, color: accent, marginBottom: 10 }}>
+        {isLink ? "🔗 Link to entity" : "🔀 Merge with entity"}
+      </div>
+
+      {error && (
+        <div style={{ fontSize: 12, color: "var(--accent-red)", marginBottom: 8 }}>{error}</div>
+      )}
+
+      {/* Search target */}
+      {!target ? (
+        <div style={{ position: "relative" }}>
+          <input
+            ref={inputRef}
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search entity..."
+            style={{
+              width: "100%", padding: "8px 12px", boxSizing: "border-box",
+              background: "var(--bg-primary)", border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: 8, color: "var(--text-primary)", fontSize: 13, outline: "none",
+            }}
+          />
+          {results.length > 0 && (
+            <div style={{
+              position: "absolute", top: "100%", left: 0, right: 0, zIndex: 20,
+              background: "var(--bg-secondary)", border: "1px solid rgba(255,255,255,0.1)",
+              borderRadius: 8, marginTop: 4, maxHeight: 180, overflowY: "auto",
+            }}>
+              {results.map((e) => (
+                <div key={e.uuid} onClick={() => selectTarget(e)} style={{
+                  padding: "8px 12px", cursor: "pointer", fontSize: 13,
+                  borderBottom: "1px solid rgba(255,255,255,0.03)",
+                }}
+                onMouseEnter={(ev) => ev.currentTarget.style.background = `${accent}15`}
+                onMouseLeave={(ev) => ev.currentTarget.style.background = "transparent"}
+                >
+                  <div>{e.name}</div>
+                  {e.summary && <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
+                    {e.summary.slice(0, 60)}
+                  </div>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
+          {/* Target selected */}
+          <div style={{
+            display: "flex", justifyContent: "space-between", alignItems: "center",
+            padding: "8px 12px", background: "var(--bg-primary)", borderRadius: 8, marginBottom: 10,
+          }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{target.entity.name}</div>
+              <div style={{ fontSize: 11, color: "var(--text-secondary)" }}>
+                {(target.relationships || []).length} relationships
+              </div>
+            </div>
+            <button onClick={() => { setTarget(null); setError(null); }} style={{
+              background: "none", border: "none", color: "var(--text-secondary)",
+              cursor: "pointer", fontSize: 13,
+            }}>✕</button>
+          </div>
+
+          {/* Link options */}
+          {isLink && (
+            <>
+              <input
+                type="text"
+                value={relationName}
+                onChange={(e) => setRelationName(e.target.value)}
+                placeholder="Relation (e.g. COMPETED_IN)"
+                style={{
+                  width: "100%", padding: "8px 12px", marginBottom: 8, boxSizing: "border-box",
+                  background: "var(--bg-primary)", border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: 8, color: "var(--text-primary)", fontSize: 13, outline: "none",
+                }}
+              />
+              <input
+                type="text"
+                value={fact}
+                onChange={(e) => setFact(e.target.value)}
+                placeholder="Description (optional)"
+                style={{
+                  width: "100%", padding: "8px 12px", marginBottom: 10, boxSizing: "border-box",
+                  background: "var(--bg-primary)", border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: 8, color: "var(--text-primary)", fontSize: 13, outline: "none",
+                }}
+              />
+            </>
+          )}
+
+          {/* Merge options */}
+          {!isLink && (
+            <>
+              <div style={{ fontSize: 12, color: "var(--text-secondary)", marginBottom: 6 }}>Keep name:</div>
+              <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+                {[
+                  { key: "current", label: entityName },
+                  { key: "target", label: target.entity.name },
+                ].map(({ key, label }) => (
+                  <button key={key} onClick={() => setKeepName(key)} style={{
+                    flex: 1, padding: "6px 8px", borderRadius: 6, fontSize: 12,
+                    cursor: "pointer", transition: "all 0.2s",
+                    background: keepName === key ? `${accent}25` : "transparent",
+                    border: `1px solid ${keepName === key ? accent : "rgba(255,255,255,0.1)"}`,
+                    color: keepName === key ? accent : "var(--text-secondary)",
+                  }}>{label}</button>
+                ))}
+              </div>
+              <textarea
+                value={summary}
+                onChange={(e) => setSummary(e.target.value)}
+                placeholder="Summary (optional)"
+                style={{
+                  width: "100%", minHeight: 50, padding: 8, marginBottom: 10, boxSizing: "border-box",
+                  background: "var(--bg-primary)", border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: 8, color: "var(--text-primary)", fontSize: 12,
+                  resize: "none", outline: "none", fontFamily: "inherit",
+                }}
+              />
+            </>
+          )}
+
+          {/* Execute */}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={handleExecute} disabled={executing} style={{
+              flex: 1, padding: "8px 12px", borderRadius: 8, fontSize: 12, fontWeight: 600,
+              cursor: executing ? "wait" : "pointer", opacity: executing ? 0.6 : 1,
+              background: `${accent}25`, border: `1px solid ${accent}66`, color: accent,
+            }}>
+              {executing ? "..." : isLink ? "Create Link" : "Confirm Merge"}
+            </button>
+            <button onClick={onCancel} style={{
+              padding: "8px 12px", borderRadius: 8, fontSize: 12,
+              background: "transparent", border: "1px solid rgba(255,255,255,0.1)",
+              color: "var(--text-secondary)", cursor: "pointer",
+            }}>Cancel</button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return "";
+  try {
+    const d = new Date(dateStr);
+    return d.toLocaleDateString("en-NZ", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return dateStr;
+  }
+}
