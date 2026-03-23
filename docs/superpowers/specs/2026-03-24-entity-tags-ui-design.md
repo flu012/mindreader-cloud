@@ -63,6 +63,8 @@ New `TagEditor` component (defined inside `DetailPanel.jsx` or extracted to own 
 />
 ```
 
+**Refresh after mutation:** `onTagsChanged` must call the parent's `onEntityUpdate` callback (which refetches entity detail via `GET /api/entity/:name`) so the detail panel, graph, and list views all reflect the updated tags.
+
 ## 2. Context-Aware Global Search Bar
 
 **File:** `packages/mindreader-ui/ui/src/App.jsx`, `packages/mindreader-ui/ui/src/components/GraphView.jsx`
@@ -76,7 +78,7 @@ Delete the search bar UI from `GraphView.jsx` (lines ~320-398) — the search in
 When `activeTab === "graph"`:
 - The global search bar's `onChange` passes the query to GraphView via a new `searchQuery` prop
 - GraphView uses the query to filter nodes in the Sigma graph (same logic the standalone bar used — match node labels, show dropdown of top 10 matches)
-- Add a new `onSearchSelect` callback prop: when user selects a result from the dropdown, GraphView animates the camera to that node and triggers `onNodeClick`
+- Add a new `onSearchSelect` callback prop: when user selects a result from the dropdown, GraphView animates the camera to that node and triggers `onNodeClick`. The `onSearchSelect` handler in App.jsx must also clear `searchQuery` (set to `""`) so the search text doesn't persist after selection.
 - The dropdown renders inside GraphView (positioned below the top bar) since it needs access to Sigma node data
 
 ### 2.3 Other Tabs Unchanged
@@ -85,12 +87,12 @@ When `activeTab !== "graph"`, the global search bar behaves exactly as it does n
 
 ### 2.4 Search Results Dropdown for Graph
 
-GraphView renders a dropdown (absolutely positioned below the top bar area) showing up to 10 matching nodes when `searchQuery` is non-empty. Each result shows:
+GraphView renders a dropdown (absolutely positioned below the top bar area) showing up to 10 matching nodes when `searchQuery` is non-empty. The search matches node labels only (consistent with the original graph search behavior). Each result shows:
 - Entity name
 - Category badge (colored dot)
-- Tags as small read-only pills
+- Tags as small read-only pills (looked up from the original `data.nodes` array, since Sigma node attributes don't include tags)
 
-Clicking a result: animates camera to node, highlights it, calls `onNodeClick`.
+Clicking a result: animates camera to node, highlights it, calls `onSearchSelect` (which clears the search and calls `onNodeClick`).
 
 ## 3. Tag-Aware Entity Search
 
