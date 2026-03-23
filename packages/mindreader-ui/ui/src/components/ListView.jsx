@@ -107,6 +107,13 @@ export default function ListView({ searchQuery, onSelectEntity }) {
                     {entity.summary.length > 150 ? entity.summary.slice(0, 150) + "..." : entity.summary}
                   </div>
                 )}
+                {entity.tags && entity.tags.length > 0 && (
+                  <div className="tag-pills" style={{ marginTop: 4 }}>
+                    {entity.tags.map(tag => (
+                      <span key={tag} className="tag-pill tag-pill--small">{tag}</span>
+                    ))}
+                  </div>
+                )}
                 <div className="list-item-meta">
                   {entity.created_at && (
                     <span>{formatDate(entity.created_at)}</span>
