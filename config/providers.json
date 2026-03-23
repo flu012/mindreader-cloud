@@ -1,0 +1,30 @@
+{
+  "llm": {
+    "openai": {
+      "baseUrl": "https://api.openai.com/v1",
+      "defaultModel": "gpt-4o-mini",
+      "models": ["gpt-4o", "gpt-4o-mini", "gpt-4.1-mini"]
+    },
+    "anthropic": {
+      "baseUrl": "https://api.anthropic.com/v1",
+      "defaultModel": "claude-sonnet-4-6",
+      "models": ["claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
+      "note": "Requires OpenAI-compatible proxy (e.g. LiteLLM). Set LLM_BASE_URL to your proxy endpoint."
+    },
+    "dashscope": {
+      "baseUrl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "defaultModel": "qwen3.5-flash",
+      "models": ["qwen3.5-flash", "qwen3.5-plus"]
+    }
+  },
+  "embedder": {
+    "openai": {
+      "baseUrl": "https://api.openai.com/v1",
+      "defaultModel": "text-embedding-3-small"
+    },
+    "dashscope": {
+      "baseUrl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "defaultModel": "text-embedding-v4"
+    }
+  }
+}
