@@ -2246,8 +2246,10 @@ export function startServer(configOverrides, logger) {
       const session = driver.session();
       try {
         const result = await session.run(
-          `MATCH (e:Entity) WHERE e.category IS NULL OR e.category = ''
-           RETURN e.name AS name, e.summary AS summary, elementId(e) AS eid
+          `MATCH (e:Entity)
+           WHERE e.category IS NULL OR e.category = '' OR e.tags IS NULL
+           RETURN e.name AS name, e.summary AS summary, elementId(e) AS eid,
+                  e.category AS existingCategory
            LIMIT 20`
         );
         const uncategorized = result.records;
@@ -2259,6 +2261,7 @@ export function startServer(configOverrides, logger) {
           name: rec.get("name") || "",
           summary: (rec.get("summary") || "").slice(0, 200),
           eid: rec.get("eid"),
+          existingCategory: rec.get("existingCategory") || "",
         }));
 
         // Build category list from DB
@@ -2270,18 +2273,26 @@ export function startServer(configOverrides, logger) {
           `${e.idx}. "${e.name}" — ${e.summary || "no summary"}`
         ).join("\n");
 
-        const prompt = `Categorize each entity into ONE of these categories, or "other" if none fit.
+        const prompt = `Categorize each entity and extract descriptive tags.
 
 Categories:
 ${catList}
 - other: Does not fit any category above
 
+For tags, extract 1-8 lowercase descriptive tags per entity covering:
+- Roles (engineer, swimmer, manager, owner)
+- Relationships (daughter, wife, colleague)
+- Skills/interests (swimming, coding)
+- Locations (Auckland, NZ)
+- Technologies (Python, React, Docker)
+- Business traits (ASX-listed, franchise)
+Do not repeat the category as a tag. If the entity is noise, use empty tags.
+
 Entities:
 ${entityList}
 
-Return ONLY a JSON array of objects: [{"idx": 0, "category": "person"}, ...]
-The "category" field MUST be one of: ${validKeys.join(", ")}, other
-If an entity is noise (implementation detail, UI element, debugging artifact, code snippet), use "other".`;
+Return ONLY a JSON array: [{"idx": 0, "category": "person", "tags": ["swimmer", "daughter"]}, ...]
+The "category" field MUST be one of: ${validKeys.join(", ")}, other`;
 
         // Call LLM via Python subprocess
         const { execFile: ef } = await import("node:child_process");
@@ -2299,7 +2310,7 @@ from openai import OpenAI
 client = OpenAI(api_key=os.getenv("LLM_API_KEY"), base_url=os.getenv("LLM_BASE_URL"))
 with open(os.getenv("MG_PROMPT_FILE")) as f:
     prompt = json.load(f)
-kwargs = dict(model=os.getenv("MG_MODEL", "gpt-4o-mini"), messages=[{"role": "user", "content": prompt}], temperature=0.1, max_tokens=1000, response_format={"type": "json_object"})
+kwargs = dict(model=os.getenv("MG_MODEL", "gpt-4o-mini"), messages=[{"role": "user", "content": prompt}], temperature=0.1, max_tokens=2000, response_format={"type": "json_object"})
 if "dashscope" in (os.getenv("LLM_BASE_URL") or ""):
     kwargs["extra_body"] = {"enable_thinking": False}
 resp = client.chat.completions.create(**kwargs)
@@ -2341,16 +2352,38 @@ except Exception:
         for (const a of assignments) {
           const entity = entities[a.idx];
           if (!entity) continue;
-          // Skip entities where LLM returned unrecognized category — don't default to "other"
-          if (!a.category || ![...validKeys, "other"].includes(a.category)) continue;
-          await session.run(
-            `MATCH (e:Entity) WHERE elementId(e) = $eid SET e.category = $cat`,
-            { eid: entity.eid, cat: a.category }
-          );
+
+          const cat = a.category;
+          const tags = Array.isArray(a.tags)
+            ? [...new Set(a.tags.filter(t => typeof t === "string" && t.trim()).map(t => t.toLowerCase().trim()))].sort()
+            : [];
+
+          // Determine what to write
+          const needsCat = !entity.existingCategory && cat && [...validKeys, "other"].includes(cat);
+          const needsTags = tags.length > 0;
+
+          if (!needsCat && !needsTags) continue;
+
+          if (needsCat && needsTags) {
+            await session.run(
+              `MATCH (e:Entity) WHERE elementId(e) = $eid SET e.category = $cat, e.tags = $tags`,
+              { eid: entity.eid, cat, tags }
+            );
+          } else if (needsCat) {
+            await session.run(
+              `MATCH (e:Entity) WHERE elementId(e) = $eid SET e.category = $cat`,
+              { eid: entity.eid, cat }
+            );
+          } else {
+            await session.run(
+              `MATCH (e:Entity) WHERE elementId(e) = $eid SET e.tags = $tags`,
+              { eid: entity.eid, tags }
+            );
+          }
           count++;
         }
         if (count > 0) {
-          logger?.info?.(`🧠 MindReader: LLM auto-categorized ${count} entities`);
+          logger?.info?.(`🧠 MindReader: LLM auto-categorized/tagged ${count} entities`);
         }
       } finally {
         await session.close();
