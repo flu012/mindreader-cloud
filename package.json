@@ -1,0 +1,12 @@
+{
+  "name": "mindreader",
+  "private": true,
+  "version": "0.4.0",
+  "workspaces": ["packages/mindreader-ui", "packages/openclaw-plugin"],
+  "scripts": {
+    "start": "npm run start -w packages/mindreader-ui",
+    "build": "npm run build -w packages/mindreader-ui",
+    "dev": "npm run dev -w packages/mindreader-ui",
+    "setup": "bash scripts/setup.sh"
+  }
+}

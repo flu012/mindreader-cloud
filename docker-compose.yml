@@ -1,0 +1,2 @@
+include:
+  - packages/mindgraph/docker/docker-compose.yml
