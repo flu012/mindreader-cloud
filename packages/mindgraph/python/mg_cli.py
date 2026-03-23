@@ -3,9 +3,13 @@ Memory Graph CLI — lightweight interface for MindReader.
 With async queue processing and duplicate caching.
 
 Usage:
-    python mg_cli.py search "query"
+    python mg_cli.py search "query" [--json]
     python mg_cli.py add "content" --source agent [--async]
     python mg_cli.py entities --limit 50
+    python mg_cli.py tags "Entity Name"
+    python mg_cli.py tags "Entity Name" --add "tag1,tag2"
+    python mg_cli.py tags "Entity Name" --set "tag1,tag2"
+    python mg_cli.py tags --backfill [--force]
     python mg_cli.py status
     python mg_cli.py maint stats
     python mg_cli.py maint relationships [--limit 50]
@@ -789,6 +793,65 @@ async def _maint_delete_other(driver, args):
     print(f"\n✅ Cleanup complete.")
 
 
+async def cmd_tags(args):
+    """View or manage entity tags."""
+    # Backfill mode
+    if args.backfill:
+        from tagger import tag_entities
+        total = tag_entities(force=args.force, batch_size=args.batch_size)
+        print(f"\nDone: {total} entities tagged.")
+        return
+
+    # Name required for read/add/set
+    if not args.name:
+        print("Usage: mg tags <entity-name> [--add tags] [--set tags]")
+        print("       mg tags --backfill [--force] [--batch-size 50]")
+        return
+
+    driver = _get_neo4j_driver()
+    try:
+        with driver.session() as session:
+            # Find entity
+            result = session.run(
+                "MATCH (e:Entity) WHERE toLower(e.name) = toLower($name) "
+                "RETURN e.name AS name, e.category AS category, e.tags AS tags, elementId(e) AS eid",
+                name=args.name,
+            )
+            rec = result.single()
+            if not rec:
+                print(f"Entity not found: {args.name}")
+                return
+
+            name = rec["name"]
+            category = rec["category"] or "other"
+            current_tags = list(rec["tags"] or [])
+            eid = rec["eid"]
+
+            if args.set_tags is not None:
+                # Overwrite tags
+                new_tags = sorted(set(t.strip().lower() for t in args.set_tags.split(",") if t.strip()))
+                session.run(
+                    "MATCH (e:Entity) WHERE elementId(e) = $eid SET e.tags = $tags",
+                    eid=eid, tags=new_tags,
+                )
+                print(f"{name} [{category}]: {', '.join(new_tags)}")
+            elif args.add_tags:
+                # Append tags
+                additions = [t.strip().lower() for t in args.add_tags.split(",") if t.strip()]
+                merged = sorted(set(t.lower() for t in current_tags) | set(additions))
+                session.run(
+                    "MATCH (e:Entity) WHERE elementId(e) = $eid SET e.tags = $tags",
+                    eid=eid, tags=merged,
+                )
+                print(f"{name} [{category}]: {', '.join(merged)}")
+            else:
+                # Read tags
+                tags_str = ", ".join(current_tags) if current_tags else "(no tags)"
+                print(f"{name} [{category}]: {tags_str}")
+    finally:
+        driver.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Memory Graph CLI")
     sub = parser.add_subparsers(dest="command")
@@ -855,6 +918,15 @@ def main():
     p_maint_del.add_argument("--confirm", action="store_true",
                             help="Actually delete (default: dry-run preview)")
 
+    # tags
+    p_tags = sub.add_parser("tags", help="View or manage entity tags")
+    p_tags.add_argument("name", nargs="?", help="Entity name to view/modify tags")
+    p_tags.add_argument("--add", dest="add_tags", help="Comma-separated tags to append")
+    p_tags.add_argument("--set", dest="set_tags", help="Comma-separated tags to replace all")
+    p_tags.add_argument("--backfill", action="store_true", help="Batch-tag entities without tags")
+    p_tags.add_argument("--force", action="store_true", help="With --backfill: re-tag all entities")
+    p_tags.add_argument("--batch-size", dest="batch_size", type=int, default=50)
+
     args = parser.parse_args()
 
     if args.command == "search":
@@ -871,6 +943,8 @@ def main():
         asyncio.run(cmd_projects(args))
     elif args.command == "maint":
         asyncio.run(cmd_maint(args))
+    elif args.command == "tags":
+        asyncio.run(cmd_tags(args))
     else:
         parser.print_help()
 
