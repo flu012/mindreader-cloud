@@ -104,7 +104,12 @@ export default function App() {
     }
   }, []);
 
-  const handleNodeHover = useCallback((node) => setHoveredNode(node), []);
+  const handleNodeHover = useCallback((node) => {
+    if (!node) { setHoveredNode(null); return; }
+    // Enrich with tags from original graph data
+    const full = graphData.nodes.find(n => n.id === node.id);
+    setHoveredNode({ ...node, tags: full?.tags || [], summary: full?.summary });
+  }, [graphData.nodes]);
   const handleMouseMove = useCallback((e) => setTooltipPos({ x: e.clientX, y: e.clientY }), []);
 
   const toggleFilter = useCallback((group) => {

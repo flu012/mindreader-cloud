@@ -35,6 +35,16 @@ export default function HoverTooltip({ node, position }) {
         <span>{"\uD83D\uDCCA"} {node.labels?.join(", ") || "Entity"}</span>
         {node.created_at && <span>{"\uD83D\uDCC5"} {formatDate(node.created_at)}</span>}
       </div>
+      {node.tags && node.tags.length > 0 && (
+        <div className="tag-pills" style={{ marginTop: 4, padding: "0 10px 6px" }}>
+          {node.tags.slice(0, 5).map(tag => (
+            <span key={tag} className="tag-pill tag-pill--small">{tag}</span>
+          ))}
+          {node.tags.length > 5 && (
+            <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>+{node.tags.length - 5} more</span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
