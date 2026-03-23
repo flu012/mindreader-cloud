@@ -140,14 +140,29 @@ step_components() {
     INCLUDE_OPENCLAW=false
     OPENCLAW_EXTENSIONS_PATH=""
 
-    if ask_yn "Include OpenClaw Plugin? (optional browser extension integration)" "N"; then
+    if ask_yn "Include OpenClaw Plugin? (optional integration for OpenClaw agents)" "N"; then
         INCLUDE_OPENCLAW=true
         echo
+
+        # Auto-detect default OpenClaw extensions path
+        local default_ext_path=""
+        if [[ -d "$HOME/.openclaw/extensions" ]]; then
+            default_ext_path="$HOME/.openclaw/extensions"
+        fi
+
         info "OpenClaw plugin selected."
-        OPENCLAW_EXTENSIONS_PATH="$(ask "Path to your OpenClaw extensions directory" "${OPENCLAW_EXTENSIONS_PATH:-}")"
+        echo "  The plugin files will be copied into your OpenClaw extensions directory."
+        echo "  A node_modules symlink will be created so the plugin can find its dependencies."
         echo
-        warn "Reminder: In OpenClaw's settings, point the extension to this monorepo root:"
-        warn "  $REPO_ROOT"
+        OPENCLAW_EXTENSIONS_PATH="$(ask "Path to your OpenClaw extensions directory" "${default_ext_path}")"
+
+        if [[ ! -d "$OPENCLAW_EXTENSIONS_PATH" ]]; then
+            warn "Directory does not exist: $OPENCLAW_EXTENSIONS_PATH"
+            if ask_yn "Create it?" "Y"; then
+                mkdir -p "$OPENCLAW_EXTENSIONS_PATH"
+                success "Created $OPENCLAW_EXTENSIONS_PATH"
+            fi
+        fi
     fi
     echo
 }
@@ -382,6 +397,51 @@ init_neo4j_indexes() {
     fi
 }
 
+install_openclaw_plugin() {
+    info "Installing OpenClaw plugin..."
+    local plugin_src="$REPO_ROOT/packages/openclaw-plugin"
+    local plugin_dest="$OPENCLAW_EXTENSIONS_PATH/mindreader"
+
+    # Check if destination already exists
+    if [[ -d "$plugin_dest" ]] || [[ -L "$plugin_dest" ]]; then
+        warn "Extension directory already exists: $plugin_dest"
+        if ask_yn "Replace it?" "Y"; then
+            # Back up if it's a real directory (not a symlink)
+            if [[ -d "$plugin_dest" ]] && [[ ! -L "$plugin_dest" ]]; then
+                local backup_dir="${plugin_dest}.backup-$(date +%Y%m%d%H%M%S)"
+                mv "$plugin_dest" "$backup_dir"
+                info "Old extension backed up to: $backup_dir"
+            else
+                rm -f "$plugin_dest"
+            fi
+        else
+            warn "Skipping OpenClaw plugin installation."
+            return
+        fi
+    fi
+
+    # Create extension directory and copy plugin files
+    mkdir -p "$plugin_dest"
+    cp "$plugin_src/index.js" "$plugin_dest/"
+    cp "$plugin_src/package.json" "$plugin_dest/"
+    cp "$plugin_src/openclaw.plugin.json" "$plugin_dest/"
+
+    # Symlink node_modules so @mindreader/ui resolves at runtime
+    # (OpenClaw's boundary check rejects full-directory symlinks, but
+    #  node_modules symlinks work because Node resolves them internally)
+    ln -sf "$REPO_ROOT/node_modules" "$plugin_dest/node_modules"
+
+    success "Plugin installed to: $plugin_dest"
+    echo
+    echo "  Next steps for OpenClaw:"
+    echo "    1. Ensure 'mindreader' is in your openclaw.json plugins.entries"
+    echo "    2. Set plugins.slots.memory to 'mindreader'"
+    echo "    3. Restart OpenClaw:  openclaw gateway restart"
+    echo
+    warn "When you update MindReader, re-run this step or copy the plugin files:"
+    echo "    cp $plugin_src/{index.js,package.json,openclaw.plugin.json} $plugin_dest/"
+}
+
 step_verify_install() {
     separator
     echo -e "${BOLD}Step 4: Verify & Install${RESET}"
@@ -459,6 +519,12 @@ step_verify_install() {
     fi
 
     init_neo4j_indexes
+
+    # Install OpenClaw plugin if selected
+    if [[ "$INCLUDE_OPENCLAW" == "true" ]] && [[ -n "$OPENCLAW_EXTENSIONS_PATH" ]]; then
+        install_openclaw_plugin
+    fi
+
     echo
 }
 
