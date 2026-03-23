@@ -2,6 +2,74 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { EntityActivityHistory } from "./ActivityLog";
 import { CATEGORY_COLORS, CATEGORY_LABELS, NODE_TYPES } from "../constants";
 
+function TagEditor({ tags, entityName, onTagsChanged }) {
+  const [adding, setAdding] = useState(false);
+  const [inputValue, setInputValue] = useState("");
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (adding && inputRef.current) inputRef.current.focus();
+  }, [adding]);
+
+  const saveTags = async (newTags) => {
+    const normalized = [...new Set(newTags.filter(t => t.trim()).map(t => t.toLowerCase().trim()))].sort();
+    try {
+      const res = await fetch(`/api/entity/${encodeURIComponent(entityName)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tags: normalized }),
+      });
+      if (res.ok && onTagsChanged) onTagsChanged();
+    } catch (err) {
+      console.error("Failed to update tags:", err);
+    }
+  };
+
+  const handleAdd = () => {
+    const tag = inputValue.toLowerCase().trim();
+    if (!tag) return;
+    const merged = [...new Set([...tags, tag])].sort();
+    setInputValue("");
+    saveTags(merged);
+  };
+
+  const handleRemove = (tag) => {
+    saveTags(tags.filter(t => t !== tag));
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") { e.preventDefault(); handleAdd(); }
+    if (e.key === "Escape") { setAdding(false); setInputValue(""); }
+  };
+
+  return (
+    <div className="tag-pills" style={{ margin: "8px 0" }}>
+      {tags.map(tag => (
+        <span key={tag} className="tag-pill">
+          {tag}
+          <button className="tag-remove" onClick={() => handleRemove(tag)}>✕</button>
+        </span>
+      ))}
+      {adding ? (
+        <input
+          ref={inputRef}
+          className="tag-add-input"
+          value={inputValue}
+          onChange={e => setInputValue(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onBlur={() => { if (!inputValue.trim()) setAdding(false); }}
+          placeholder="tag name"
+        />
+      ) : (
+        <button className="tag-add-btn" onClick={() => setAdding(true)}>+</button>
+      )}
+      {tags.length === 0 && !adding && (
+        <span style={{ fontSize: "0.75rem", color: "var(--text-secondary)", marginLeft: 4 }}>(no tags)</span>
+      )}
+    </div>
+  );
+}
+
 export default function DetailPanel({ entity, relationships, onClose, onNavigate, groupColors, categoryColors, onRefresh, onEntityUpdate, onDeleteNode }) {
   const [activeAction, setActiveAction] = useState(null); // null | "merge" | "link"
 
@@ -17,6 +85,8 @@ export default function DetailPanel({ entity, relationships, onClose, onNavigate
       <h2>{entity.name}</h2>
       <CategorySelector entityName={entity.name} currentCategory={entity.category || entity.group_id} onRefresh={onEntityUpdate || onRefresh} />
       <NodeTypeSelector entityName={entity.name} currentNodeType={entity.node_type || "normal"} onRefresh={onEntityUpdate || onRefresh} />
+
+      <TagEditor tags={entity.tags || []} entityName={entity.name} onTagsChanged={onEntityUpdate || onRefresh} />
 
       {/* Editable summary */}
       <EditableSummary entityName={entity.name} savedSummary={entity.summary || ""} />
