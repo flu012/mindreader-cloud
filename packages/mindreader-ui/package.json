@@ -9,10 +9,11 @@
     "build": "npm run build --prefix ui"
   },
   "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.0",
     "express": "^4.21.0",
     "neo4j-driver": "^5.27.0",
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.0"
+    "openai": "^6.32.0"
   },
   "devDependencies": {
     "concurrently": "^8.2.0"
