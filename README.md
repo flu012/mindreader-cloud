@@ -156,13 +156,17 @@ mg maint scan                        # Scan for issues
 mg maint fix                         # Auto-fix duplicates and orphans
 ```
 
-### AI Agent Integration
+### OpenClaw Integration — Build Memory While You Chat
 
-MindReader integrates with AI agent frameworks (OpenClaw) to provide automatic memory:
+MindReader is built as a first-class [OpenClaw](https://github.com/openclaw) extension. Install it once, and every conversation with your AI agent automatically builds and maintains your personal knowledge graph — no manual input required.
 
-- **Auto-recall** — Relevant memories injected into agent prompts before execution
-- **Auto-capture** — Facts extracted from agent conversations and stored automatically
-- **Tools** — Agents can search, store, and list memories via tool calls
+- **Auto-capture** — As you chat with your agent, MindReader silently extracts entities, facts, and relationships from the conversation and stores them in your knowledge graph
+- **Auto-recall** — Before the agent responds, relevant memories are automatically retrieved and injected into its context, giving it long-term memory across sessions
+- **Self-cleaning** — Background maintenance runs continuously: auto-categorizing new entities, extracting tags, detecting duplicates, and repairing relationships — your memory stays clean without any effort
+- **Tool calls** — Agents can also explicitly search, store, and list memories via MindReader's tool interface
+- **Web UI** — Access the full visual graph explorer at any time to see, manage, and evolve your accumulated knowledge
+
+> Just talk to your agent naturally. MindReader handles the rest — capturing what matters, organizing it into a structured graph, and keeping it clean over time.
 
 ---
 
