@@ -1928,33 +1928,28 @@ except Exception:
     try {
       const session = driver.session();
       try {
-        const [selfLoops, longNames, duplicateEdges, multiEdges] = await Promise.all([
-          // Self-loops
-          session.run(
-            `MATCH (a:Entity)-[r:RELATES_TO]->(a)
-             RETURN elementId(r) AS eid, a.name AS entity, r.name AS relation, r.fact AS fact`
-          ),
-          // Garbage/long relation names (>50 chars)
-          session.run(
-            `MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity)
-             WHERE size(r.name) > 50
-             RETURN elementId(r) AS eid, a.name AS from, r.name AS relation, b.name AS to, r.fact AS fact`
-          ),
-          // Exact duplicate edges (same source, target, relation name)
-          session.run(
-            `MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity)
-             WITH a.name AS source, b.name AS target, r.name AS relation, collect(elementId(r)) AS eids, collect(r.fact) AS facts
-             WHERE size(eids) > 1
-             RETURN source, target, relation, eids, facts`
-          ),
-          // Multiple edges between same pair (different relation names)
-          session.run(
-            `MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity)
-             WITH a.name AS source, b.name AS target, collect({eid: elementId(r), relation: r.name, fact: r.fact}) AS edges
-             WHERE size(edges) > 1
-             RETURN source, target, edges`
-          ),
-        ]);
+        // Run sequentially — Neo4j doesn't allow parallel queries on a single session
+        const selfLoops = await session.run(
+          `MATCH (a:Entity)-[r:RELATES_TO]->(a)
+           RETURN elementId(r) AS eid, a.name AS entity, r.name AS relation, r.fact AS fact`
+        );
+        const longNames = await session.run(
+          `MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity)
+           WHERE size(r.name) > 50
+           RETURN elementId(r) AS eid, a.name AS from, r.name AS relation, b.name AS to, r.fact AS fact`
+        );
+        const duplicateEdges = await session.run(
+          `MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity)
+           WITH a.name AS source, b.name AS target, r.name AS relation, collect(elementId(r)) AS eids, collect(r.fact) AS facts
+           WHERE size(eids) > 1
+           RETURN source, target, relation, eids, facts`
+        );
+        const multiEdges = await session.run(
+          `MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity)
+           WITH a.name AS source, b.name AS target, collect({eid: elementId(r), relation: r.name, fact: r.fact}) AS edges
+           WHERE size(edges) > 1
+           RETURN source, target, edges`
+        );
 
         const issues = [];
 
