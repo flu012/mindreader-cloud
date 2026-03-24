@@ -73,6 +73,7 @@ https://github.com/user-attachments/assets/4a93cef0-e48e-464d-a70c-1759d16c5de2
 - 按类别过滤，专注重点内容
 
 ![图谱可视化](docs/images/mind%20graph%20view.png)
+*交互式力导向图谱——节点按类别着色，大小按连接数量自动调整。点击任意节点可在右侧打开详情面板。*
 
 ### 实体管理
 
@@ -90,6 +91,8 @@ https://github.com/user-attachments/assets/4a93cef0-e48e-464d-a70c-1759d16c5de2
 <img src="docs/images/manual%20link%20memory.png" width="300" alt="关联实体">
 <img src="docs/images/manual%20merge%20memory.png" width="300" alt="合并实体">
 </p>
+
+*左：手动关联两个实体——搜索并选择目标节点即可创建关系。右：合并重复实体——所有关系都会被保留并转移到合并后的节点。*
 
 ### 智能搜索
 
@@ -116,7 +119,10 @@ https://github.com/user-attachments/assets/4a93cef0-e48e-464d-a70c-1759d16c5de2
 <img src="docs/images/node%20creatioon%20timeline.png" width="400" alt="时间线视图">
 </p>
 
+*左：列表视图——浏览所有实体，显示摘要、标签和分类标记，可从侧边栏按分类过滤。右：时间线视图——按时间顺序组织记忆，显示每个实体首次被捕获的时间。*
+
 ![分类视图](docs/images/node%20categorisation%20view.png)
+*分类视图——管理全部12个实体分类，显示各分类数量。点击任意分类浏览其实体，或选中节点查看完整详情面板。*
 
 ### 自动维护
 
@@ -132,6 +138,7 @@ MindReader不只是存储记忆——它还能保持记忆的整洁。
 | **孤立清理** | 发现并移除断开连接的实体 |
 
 ![维护中心](docs/images/memory%20automastically%20clean%20up.png)
+*维护中心——使用AI批量重分类未归类实体。LLM分析每个实体的名称和摘要，自动分配最合适的分类。*
 
 ### 命令行工具
 

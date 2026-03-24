@@ -73,6 +73,7 @@ Explore your memories as an interactive force-directed graph. Nodes represent en
 - Filter by category to focus on what matters
 
 ![Graph Visualization](docs/images/mind%20graph%20view.png)
+*Interactive force-directed graph — nodes are color-coded by category and sized by connection count. Click any node to open the detail panel on the right.*
 
 ### Entity Management
 
@@ -90,6 +91,8 @@ Click any entity to open the detail panel with full control over your memories:
 <img src="docs/images/manual%20link%20memory.png" width="300" alt="Link entities">
 <img src="docs/images/manual%20merge%20memory.png" width="300" alt="Merge entities">
 </p>
+
+*Left: Manually link two entities by searching and selecting a target node. Right: Merge duplicate entities — all relationships are preserved and transferred to the surviving node.*
 
 ### Smart Search
 
@@ -116,7 +119,10 @@ Search across entity names, summaries, and tags from a single search bar (Ctrl+K
 <img src="docs/images/node%20creatioon%20timeline.png" width="400" alt="Timeline View">
 </p>
 
+*Left: List view — browse all entities with summaries, tags, and category badges. Filter by category from the sidebar. Right: Timeline view — memories organized chronologically, showing when each entity was first captured.*
+
 ![Categories View](docs/images/node%20categorisation%20view.png)
+*Categories view — manage all 12 entity categories with per-category counts. Click any category to browse its entities, or select a node to view its full detail panel.*
 
 ### Auto-Maintenance
 
@@ -132,6 +138,7 @@ MindReader doesn't just store memories — it keeps them clean.
 | **Orphan Cleanup** | Finds and removes disconnected entities |
 
 ![Maintenance Hub](docs/images/memory%20automastically%20clean%20up.png)
+*Maintenance hub — batch re-categorize uncategorized entities using AI. The LLM analyzes each entity's name and summary to assign the best-fit category automatically.*
 
 ### CLI Tool
 
