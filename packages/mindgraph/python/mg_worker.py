@@ -47,6 +47,7 @@ async def process_queue_item(g, item_path: Path):
         content = item['content']
         source = item.get('source', 'agent')
         group_id = item.get('group_id', '')
+        custom_instructions = item.get('custom_instructions')
 
         print(f"Processing: {content[:50]}...")
 
@@ -56,6 +57,7 @@ async def process_queue_item(g, item_path: Path):
             source_description=source,
             reference_time=datetime.now(timezone.utc),
             group_id=group_id,
+            custom_extraction_instructions=custom_instructions,
         )
 
         # Mark as processed
