@@ -28,6 +28,12 @@ const NEO4J_PASS = process.env.NEO4J_PASS || "demo-password";
 const BASE = `http://localhost:${TEST_PORT}`;
 const TEST_PREFIX = "__test__"; // prefix for all test entities
 
+// Embedder config — used to generate fact_embedding vectors for test relationships
+const EMBEDDER_API_KEY = process.env.EMBEDDER_API_KEY || process.env.LLM_API_KEY || "";
+const EMBEDDER_BASE_URL = process.env.EMBEDDER_BASE_URL || "https://dashscope.aliyuncs.com/compatible-mode/v1";
+const EMBEDDER_MODEL = process.env.EMBEDDER_MODEL || "text-embedding-v4";
+const EMBEDDER_DIM = parseInt(process.env.EMBEDDER_DIM || "1024", 10);
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -35,11 +41,13 @@ const results = [];
 let passCount = 0;
 let failCount = 0;
 let skipCount = 0;
+let currentTestDetail = null; // tracks request/response for current test
 
 async function test(group, name, fn) {
   const start = performance.now();
   let status = "PASS";
   let error = "";
+  currentTestDetail = { requests: [] };
   try {
     await fn();
     passCount++;
@@ -49,29 +57,47 @@ async function test(group, name, fn) {
     failCount++;
   }
   const ms = (performance.now() - start).toFixed(1);
-  results.push({ group, name, status, ms, error });
+  results.push({ group, name, status, ms, error, detail: currentTestDetail });
+  currentTestDetail = null;
   const icon = status === "PASS" ? "\u2713" : "\u2717";
   const errSuffix = error ? ` \u2014 ${error}` : "";
   console.log(`  ${icon} ${name} (${ms}ms)${errSuffix}`);
 }
 
 function skip(group, name, reason) {
-  results.push({ group, name, status: "SKIP", ms: "-", error: reason });
+  results.push({ group, name, status: "SKIP", ms: "-", error: reason, detail: null });
   skipCount++;
   console.log(`  \u25CB ${name} (SKIP: ${reason})`);
+}
+
+function truncateJson(obj, maxLen = 300) {
+  const s = JSON.stringify(obj, null, 2);
+  if (s.length <= maxLen) return s;
+  return s.slice(0, maxLen) + "\n... (truncated)";
 }
 
 async function api(method, urlPath, body, expectStatus = 200) {
   const opts = { method, headers: { "Content-Type": "application/json" } };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(`${BASE}${urlPath}`, opts);
+  const reqRecord = { method, url: urlPath, body: body || null, status: res.status };
   if (res.status !== expectStatus) {
     const text = await res.text().catch(() => "");
+    reqRecord.response = text.slice(0, 300);
+    if (currentTestDetail) currentTestDetail.requests.push(reqRecord);
     throw new Error(`Expected ${expectStatus}, got ${res.status}: ${text.slice(0, 120)}`);
   }
   const ct = res.headers.get("content-type") || "";
-  if (ct.includes("json")) return res.json();
-  return res.text();
+  let data;
+  if (ct.includes("json")) {
+    data = await res.json();
+    reqRecord.response = data;
+  } else {
+    data = await res.text();
+    reqRecord.response = data.slice(0, 300);
+  }
+  if (currentTestDetail) currentTestDetail.requests.push(reqRecord);
+  return data;
 }
 
 function assert(condition, msg) {
@@ -96,7 +122,50 @@ async function cypher(statement, params = {}) {
   return data.results[0];
 }
 
+/**
+ * Call embedder API to generate vectors for an array of texts.
+ * Returns array of float arrays (one per input text).
+ */
+async function embedTexts(texts) {
+  if (!EMBEDDER_API_KEY) return null;
+  try {
+    const res = await fetch(`${EMBEDDER_BASE_URL}/embeddings`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${EMBEDDER_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: EMBEDDER_MODEL,
+        input: texts,
+        dimensions: EMBEDDER_DIM,
+      }),
+    });
+    if (!res.ok) {
+      console.warn(`   ⚠ Embedder API returned ${res.status}, skipping embeddings`);
+      return null;
+    }
+    const data = await res.json();
+    return data.data.map(d => d.embedding);
+  } catch (err) {
+    console.warn(`   ⚠ Embedder API failed: ${err.message}, skipping embeddings`);
+    return null;
+  }
+}
+
 async function seedTestData() {
+  // Fix ALL existing relationships missing group_id or episodes (required by Graphiti Pydantic model)
+  await cypher(`
+    MATCH ()-[r:RELATES_TO]->()
+    WHERE r.group_id IS NULL
+    SET r.group_id = "default"
+  `);
+  await cypher(`
+    MATCH ()-[r:RELATES_TO]->()
+    WHERE r.episodes IS NULL
+    SET r.episodes = []
+  `);
+
   await cypher(`
     UNWIND $entities AS e
     CREATE (n:Entity {
@@ -117,7 +186,7 @@ async function seedTestData() {
     ],
   });
 
-  // Create relationships
+  // Create relationships with group_id and episodes (required by Graphiti Pydantic model)
   const rels = [
     { a: `${TEST_PREFIX}Alice`, b: `${TEST_PREFIX}ProjectX`, name: "works_on", fact: "Alice works on ProjectX" },
     { a: `${TEST_PREFIX}Bob`, b: `${TEST_PREFIX}OrgZ`, name: "member_of", fact: "Bob is member of OrgZ" },
@@ -125,11 +194,32 @@ async function seedTestData() {
     { a: `${TEST_PREFIX}MergeSrc`, b: `${TEST_PREFIX}Alice`, name: "knows", fact: "MergeSrc knows Alice" },
     { a: `${TEST_PREFIX}ToDelete`, b: `${TEST_PREFIX}Bob`, name: "to_delete_rel", fact: "ToDelete relates to Bob" },
   ];
-  for (const r of rels) {
-    await cypher(`
-      MATCH (a:Entity {name: $a}), (b:Entity {name: $b})
-      CREATE (a)-[:RELATES_TO {name: $name, fact: $fact, created_at: datetime(), uuid: randomUUID()}]->(b)
-    `, r);
+
+  // Generate embeddings for all relationship facts
+  const factTexts = rels.map(r => r.fact);
+  const embeddings = await embedTexts(factTexts);
+
+  for (let i = 0; i < rels.length; i++) {
+    const r = rels[i];
+    const embedding = embeddings ? embeddings[i] : null;
+    if (embedding) {
+      await cypher(`
+        MATCH (a:Entity {name: $a}), (b:Entity {name: $b})
+        CREATE (a)-[:RELATES_TO {
+          name: $name, fact: $fact, group_id: $group_id, episodes: $episodes,
+          fact_embedding: $embedding,
+          created_at: datetime(), uuid: randomUUID()
+        }]->(b)
+      `, { ...r, group_id: "default", episodes: [], embedding });
+    } else {
+      await cypher(`
+        MATCH (a:Entity {name: $a}), (b:Entity {name: $b})
+        CREATE (a)-[:RELATES_TO {
+          name: $name, fact: $fact, group_id: $group_id, episodes: $episodes,
+          created_at: datetime(), uuid: randomUUID()
+        }]->(b)
+      `, { ...r, group_id: "default", episodes: [] });
+    }
   }
 }
 
@@ -410,8 +500,104 @@ async function runApiTests() {
     assert(data !== undefined, "should return capture result");
   });
 
-  // cli/store calls python subprocess which requires graphiti — skip if unavailable
-  skip("CLI API", "POST /api/cli/store", "Requires Python graphiti_core");
+  // cli/store tested in Plugin section below with embedder check
+
+  // == Plugin Tool Response Shapes ==========================================
+  // These tests verify the response format that the OpenClaw plugin tools depend on.
+  console.log("\n\uD83E\uDDE9 Plugin Tool Response Shapes");
+
+  await test("Plugin", "memory_get response shape (GET /api/entity/:name)", async () => {
+    const data = await api("GET", `/api/entity/${encodeURIComponent(`${TEST_PREFIX}Alice`)}`);
+    assert(data.entity, "should have entity object");
+    assert(typeof data.entity.name === "string", "entity.name should be string");
+    assert(typeof data.entity.category === "string", "entity.category should be string");
+    assert(data.entity.summary !== undefined, "entity.summary should exist");
+    assert(Array.isArray(data.entity.tags), "entity.tags should be array");
+    assert(Array.isArray(data.relationships), "relationships should be array");
+    if (data.relationships.length > 0) {
+      const r = data.relationships[0];
+      assert(typeof r.name === "string", "relationship.name should be string");
+      assert(r.direction === "outgoing" || r.direction === "incoming", "relationship.direction should be outgoing/incoming");
+      assert(r.other && typeof r.other.name === "string", "relationship.other.name should be string");
+    }
+  });
+
+  await test("Plugin", "memory_forget response shape (DELETE /api/entity/:name)", async () => {
+    // Seed a disposable entity for this test
+    await cypher(`
+      CREATE (n:Entity {
+        name: $name, summary: 'dispose me', category: 'other',
+        group_id: 'other', tags: ['test'], node_type: 'entity',
+        created_at: datetime(), uuid: randomUUID()
+      })
+    `, { name: `${TEST_PREFIX}PluginForget` });
+    await cypher(`
+      MATCH (a:Entity {name: $a}), (b:Entity {name: $b})
+      CREATE (a)-[:RELATES_TO {name: 'test_rel', fact: 'test', group_id: 'default', episodes: [],
+        created_at: datetime(), uuid: randomUUID()}]->(b)
+    `, { a: `${TEST_PREFIX}PluginForget`, b: `${TEST_PREFIX}Bob` });
+
+    const data = await api("DELETE", `/api/entity/${encodeURIComponent(`${TEST_PREFIX}PluginForget`)}`);
+    assert(typeof data.deleted === "string", "response.deleted should be string (entity name)");
+    assert(typeof data.relationshipsRemoved === "number", "response.relationshipsRemoved should be number");
+    assert(data.relationshipsRemoved >= 1, "should have removed at least 1 relationship");
+  });
+
+  await test("Plugin", "memory_stats response shape (GET /api/stats)", async () => {
+    const data = await api("GET", "/api/stats");
+    assert(data.totals, "should have totals object");
+    assert(typeof data.totals.nodes === "number", "totals.nodes should be number");
+    assert(typeof data.totals.relationships === "number", "totals.relationships should be number");
+    assert(data.entityGroups && typeof data.entityGroups === "object", "should have entityGroups object");
+  });
+
+  await test("Plugin", "memory_search response shape (GET /api/cli/search)", async () => {
+    const data = await api("GET", `/api/cli/search?q=${TEST_PREFIX}&limit=3`);
+    assert(typeof data.output === "string", "response.output should be string");
+  });
+
+  await test("Plugin", "memory_entities response shape (GET /api/cli/entities)", async () => {
+    const data = await api("GET", "/api/cli/entities?limit=3");
+    assert(typeof data.output === "string", "response.output should be string");
+  });
+
+  await test("Plugin", "before_prompt_build recall (POST /api/cli/recall)", async () => {
+    const data = await api("POST", "/api/cli/recall", {
+      prompt: `Tell me about ${TEST_PREFIX}Alice and her projects`,
+      limit: 3,
+    });
+    assert(data.context === null || typeof data.context === "string", "context should be string or null");
+    if (data.context) {
+      assert(data.context.includes("<relevant-memories>"), "context should contain relevant-memories tag");
+      assert(typeof data.count === "number" && data.count > 0, "count should be positive number");
+    }
+  });
+
+  await test("Plugin", "agent_end capture (POST /api/cli/capture)", async () => {
+    const data = await api("POST", "/api/cli/capture", {
+      messages: [
+        { role: "user", content: `${TEST_PREFIX} Alice is working on a new important feature for ProjectX` },
+        { role: "assistant", content: "I understand, Alice is working on a new important feature for ProjectX. I'll remember that." },
+      ],
+      captureMaxChars: 500,
+    });
+    assert(typeof data.stored === "number", "stored should be a number");
+    assert(data.stored === 1, "should have stored 1 conversation");
+    assert(typeof data.output === "string", "output should be a string");
+  });
+
+  // cli/store calls python daemon (Graphiti add_episode) — requires embedder
+  if (EMBEDDER_API_KEY) {
+    await test("Plugin", "memory_store (POST /api/cli/store)", async () => {
+      const data = await api("POST", "/api/cli/store", {
+        content: `${TEST_PREFIX} Alice completed the new feature for ProjectX successfully`,
+        source: "test-script",
+      });
+      assert(typeof data.output === "string", "output should be a string");
+    });
+  } else {
+    skip("Plugin", "memory_store (POST /api/cli/store)", "No EMBEDDER_API_KEY");
+  }
 
   // == LLM-dependent =======================================================
   console.log("\n\uD83E\uDD16 LLM-Dependent Endpoints");
@@ -434,13 +620,15 @@ async function runApiTests() {
 
     await test("LLM", "POST /api/entity/:name/evolve (SSE)", async () => {
       // Test that the SSE endpoint starts streaming
+      const evolveUrl = `/api/entity/${encodeURIComponent(`${TEST_PREFIX}Alice`)}/evolve`;
+      const evolveBody = { focusQuestion: "test" };
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 15000);
       try {
-        const res = await fetch(`${BASE}/api/entity/${encodeURIComponent(`${TEST_PREFIX}Alice`)}/evolve`, {
+        const res = await fetch(`${BASE}${evolveUrl}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ focusQuestion: "test" }),
+          body: JSON.stringify(evolveBody),
           signal: ctrl.signal,
         });
         assert(res.status === 200, `Expected 200, got ${res.status}`);
@@ -450,7 +638,12 @@ async function runApiTests() {
         const reader = res.body.getReader();
         const { value } = await reader.read();
         assert(value, "should receive data");
+        const firstChunk = new TextDecoder().decode(value).slice(0, 200);
         reader.cancel();
+        if (currentTestDetail) currentTestDetail.requests.push({
+          method: "POST", url: evolveUrl, body: evolveBody,
+          status: 200, response: `(SSE stream) first chunk: ${firstChunk}`,
+        });
       } finally {
         clearTimeout(timer);
       }
@@ -502,14 +695,23 @@ function generateReport() {
 
   for (const [group, tests] of Object.entries(groups)) {
     md += `## ${group}\n\n`;
-    md += `| Status | Test | Time | Error |\n`;
-    md += `|--------|------|------|-------|\n`;
     for (const t of tests) {
-      const statusIcon = t.status === "PASS" ? "PASS" : t.status === "FAIL" ? "FAIL" : "SKIP";
-      const errCell = t.error ? t.error.replace(/\|/g, "\\|").replace(/\n/g, " ").slice(0, 100) : "";
-      md += `| ${statusIcon} | ${t.name} | ${t.ms}ms | ${errCell} |\n`;
+      const statusIcon = t.status === "PASS" ? "\u2705" : t.status === "FAIL" ? "\u274C" : "\u23ED\uFE0F";
+      md += `### ${statusIcon} ${t.name} — ${t.ms}ms\n\n`;
+      if (t.error) {
+        md += `**Error:** ${t.error.replace(/\n/g, " ").slice(0, 200)}\n\n`;
+      }
+      if (t.detail && t.detail.requests.length > 0) {
+        for (const req of t.detail.requests) {
+          md += `**Request:** \`${req.method} ${req.url}\`\n`;
+          if (req.body) {
+            md += `\`\`\`json\n${truncateJson(req.body)}\n\`\`\`\n`;
+          }
+          md += `**Response** (status ${req.status}):\n`;
+          md += `\`\`\`json\n${truncateJson(req.response)}\n\`\`\`\n\n`;
+        }
+      }
     }
-    md += "\n";
   }
 
   md += `---\n*Generated by \`scripts/test-api.mjs\`*\n`;

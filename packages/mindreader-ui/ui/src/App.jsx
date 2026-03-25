@@ -22,7 +22,11 @@ const TABS = [
 ];
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState("list");
+  const [activeTab, setActiveTab] = useState(() => {
+    const hash = window.location.hash.replace("#", "");
+    const valid = TABS.map(t => t.id);
+    return valid.includes(hash) ? hash : "list";
+  });
   const [graphData, setGraphData] = useState({ nodes: [], links: [] });
   const [loading, setLoading] = useState(true);
   const [selectedNode, setSelectedNode] = useState(null);
@@ -35,6 +39,22 @@ export default function App() {
   const [dynamicCategories, setDynamicCategories] = useState(null);
   const graphRef = useRef();
   const searchInputRef = useRef();
+
+  // Sync tab with URL hash
+  const changeTab = useCallback((id) => {
+    setActiveTab(id);
+    window.location.hash = id;
+  }, []);
+
+  useEffect(() => {
+    const onHash = () => {
+      const hash = window.location.hash.replace("#", "");
+      const valid = TABS.map(t => t.id);
+      if (valid.includes(hash)) setActiveTab(hash);
+    };
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
 
   // Load categories from API
   useEffect(() => {
@@ -202,7 +222,7 @@ export default function App() {
                 <button
                   key={tab.id}
                   className={`tab-btn ${activeTab === tab.id ? "active" : ""}`}
-                  onClick={() => setActiveTab(tab.id)}
+                  onClick={() => changeTab(tab.id)}
                 >
                   <span className="tab-icon">{tab.icon}</span>
                   <span className="tab-label">{tab.label}</span>

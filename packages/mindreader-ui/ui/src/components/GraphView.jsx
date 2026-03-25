@@ -6,11 +6,11 @@ import { CATEGORY_COLORS } from "../constants";
 
 // Base sizes (before degree scaling)
 const GROUP_SIZES = {
-  project: 7,
-  person: 5,
-  infrastructure: 5.5,
-  agent: 4.5,
-  other: 3.5,
+  project: 6,
+  person: 4.5,
+  infrastructure: 5,
+  agent: 4,
+  other: 3.25,
 };
 
 function lighten(hex, amount = 0.3) {
@@ -77,9 +77,9 @@ const GraphView = forwardRef(function GraphView(
 
     // Camera ratio: Sigma's ratio = high when zoomed out, low when zoomed in
     // We want: zoom in → dots shrink (so they don't cover others)
-    //          zoom out → dots grow (so they stay visible)
+    //          zoom out → dots grow slightly (so they stay visible but not huge)
     const ratio = cameraRatioRef.current;
-    const zoomScale = Math.max(0.3, Math.min(3, Math.sqrt(ratio)));
+    const zoomScale = Math.max(0.25, Math.min(1.5, Math.pow(ratio, 0.35)));
 
     sigma.setSetting("nodeReducer", (node, attrs) => {
       const baseSize = (attrs.origSize || attrs.size || 7) * zoomScale;
@@ -299,10 +299,10 @@ const GraphView = forwardRef(function GraphView(
     });
 
     // Dynamic sizing: scale node size by degree (number of connections)
-    // Bigger variation: 0 connections = base, 5 = ~2.5x, 15 = ~4x, 30 = ~5.5x
+    // Gentler scaling: 0 connections = base, 5 = ~1.9x, 15 = ~2.6x, 30 = ~3.2x
     graph.forEachNode((node, attrs) => {
       const degree = graph.degree(node);
-      const dynamicSize = attrs.origSize * (1 + Math.sqrt(degree) * 0.8);
+      const dynamicSize = attrs.origSize * (1 + Math.sqrt(degree) * 0.4);
       graph.setNodeAttribute(node, "size", dynamicSize);
       graph.setNodeAttribute(node, "origSize", dynamicSize);
     });
@@ -390,9 +390,9 @@ function runLayout(graph) {
 
   // Scale layout params based on graph size
   const n = nodeKeys.length;
-  const repulsionBase = Math.max(2400, n * 18); // More nodes = more repulsion (+20%)
-  const springStrength = 0.0016; // Weaker springs = more spread (+20%)
-  const gravity = 0.0024; // Lighter gravity = less center pull (+20%)
+  const repulsionBase = Math.max(1600, n * 12); // Moderate repulsion
+  const springStrength = 0.002; // Slightly stronger springs = tighter clusters
+  const gravity = 0.006; // Stronger gravity pulls outliers back toward center
 
   for (let iter = 0; iter < 200; iter++) {
     // Repulsion: all nodes push each other apart
@@ -403,8 +403,8 @@ function runLayout(graph) {
         const a = nodes[ki], b = nodes[kj];
         const dx = b.x - a.x, dy = b.y - a.y;
         const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-        // Hub nodes repel more: scale by sum of degrees
-        const degreeScale = 1 + (degrees[ki] + degrees[kj]) * 0.15;
+        // Hub nodes repel more: scale by sum of degrees (gentler)
+        const degreeScale = 1 + (degrees[ki] + degrees[kj]) * 0.08;
         const force = (repulsionBase * degreeScale) / (dist * dist);
         const fx = (dx / dist) * force, fy = (dy / dist) * force;
         a.vx -= fx; a.vy -= fy; b.vx += fx; b.vy += fy;
@@ -417,8 +417,8 @@ function runLayout(graph) {
       if (!a || !b) continue;
       const dx = b.x - a.x, dy = b.y - a.y;
       const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-      // Ideal distance scales with combined degree (hubs should be further apart)
-      const idealDist = 30 + (degrees[source] + degrees[target]) * 3;
+      // Ideal distance scales with combined degree (hubs should be further apart, but capped)
+      const idealDist = 25 + Math.min((degrees[source] + degrees[target]) * 2, 60);
       const force = (dist - idealDist) * springStrength;
       const fx = (dx / dist) * force, fy = (dy / dist) * force;
       a.vx += fx; a.vy += fy; b.vx -= fx; b.vy -= fy;

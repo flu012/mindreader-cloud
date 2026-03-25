@@ -8,6 +8,8 @@ import express from "express";
 import cors from "cors";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
+import { writeFileSync, unlinkSync } from "node:fs";
 import neo4j from "neo4j-driver";
 import { getDriver, closeDriver, query, readQuery, nodeToPlain, relToPlain } from "./neo4j.js";
 import { loadConfig } from "./config.js";
@@ -2419,6 +2421,123 @@ except Exception:
   // CLI Proxy endpoints (used by openclaw-plugin)
   // ========================================================================
 
+  // ---- Python daemon (long-running process, eliminates cold-start) --------
+  let _daemonProc = null;
+  let _daemonReady = false;
+  let _daemonPending = new Map(); // id -> { resolve, reject, timer }
+  let _daemonBuffer = "";
+
+  function _startDaemon() {
+    if (_daemonProc) return;
+    const pythonDir = config.pythonPath;
+    const bootScript = `/tmp/mg_daemon_boot_${Date.now()}.sh`;
+    writeFileSync(bootScript, [
+      "#!/bin/bash",
+      `cd "${pythonDir}"`,
+      "source .venv/bin/activate",
+      `exec python -u mg_daemon.py`,
+    ].join("\n"), { mode: 0o755 });
+
+    const pyEnv = { ...process.env, PYTHONUNBUFFERED: "1" };
+    if (config.llmApiKey) pyEnv.LLM_API_KEY = config.llmApiKey;
+    if (config.llmBaseUrl) pyEnv.LLM_BASE_URL = config.llmBaseUrl;
+    if (config.llmModel) pyEnv.LLM_MODEL = config.llmModel;
+    if (config.embedderApiKey) pyEnv.EMBEDDER_API_KEY = config.embedderApiKey;
+    if (config.embedderBaseUrl) pyEnv.EMBEDDER_BASE_URL = config.embedderBaseUrl;
+    if (config.embedderModel) pyEnv.EMBEDDER_MODEL = config.embedderModel;
+    if (config.neo4jUri) pyEnv.NEO4J_URI = config.neo4jUri;
+    if (config.neo4jUser) pyEnv.NEO4J_USER = config.neo4jUser;
+    if (config.neo4jPassword) pyEnv.NEO4J_PASSWORD = config.neo4jPassword;
+
+    _daemonProc = spawn("/bin/bash", [bootScript], { env: pyEnv, stdio: ["pipe", "pipe", "pipe"] });
+    _daemonReady = false;
+
+    _daemonProc.stdout.on("data", (chunk) => {
+      _daemonBuffer += chunk.toString();
+      let lines = _daemonBuffer.split("\n");
+      _daemonBuffer = lines.pop(); // keep incomplete line in buffer
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        if (trimmed === "READY") {
+          _daemonReady = true;
+          logger?.info?.("MindReader: Python daemon ready");
+          continue;
+        }
+        if (trimmed === "PONG") continue;
+        try {
+          const resp = JSON.parse(trimmed);
+          const pending = _daemonPending.get(resp.id);
+          if (pending) {
+            clearTimeout(pending.timer);
+            _daemonPending.delete(resp.id);
+            if (resp.ok) {
+              pending.resolve(resp);
+            } else {
+              pending.reject(new Error(resp.error || "Daemon command failed"));
+            }
+          }
+        } catch {
+          // Non-JSON output — ignore
+        }
+      }
+    });
+
+    _daemonProc.stderr.on("data", (chunk) => {
+      const msg = chunk.toString().trim();
+      if (msg) logger?.warn?.("mg-daemon stderr:", msg);
+    });
+
+    _daemonProc.on("exit", (code) => {
+      logger?.warn?.(`MindReader: Python daemon exited (code ${code})`);
+      _daemonProc = null;
+      _daemonReady = false;
+      // Reject all pending requests
+      for (const [id, pending] of _daemonPending) {
+        clearTimeout(pending.timer);
+        pending.reject(new Error("Daemon exited"));
+      }
+      _daemonPending.clear();
+      try { unlinkSync(bootScript); } catch {}
+    });
+  }
+
+  function _stopDaemon() {
+    if (_daemonProc) {
+      _daemonProc.stdin.end();
+      _daemonProc.kill();
+      _daemonProc = null;
+      _daemonReady = false;
+    }
+  }
+
+  let _reqCounter = 0;
+
+  async function mgDaemon(cmd, args = {}, timeoutMs = 30000) {
+    if (!_daemonProc || !_daemonReady) {
+      _startDaemon();
+      // Wait for READY (max 30s)
+      const deadline = Date.now() + 30000;
+      while (!_daemonReady && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      if (!_daemonReady) throw new Error("Daemon failed to start within 30s");
+    }
+
+    const id = `req_${++_reqCounter}`;
+    const req = JSON.stringify({ id, cmd, args }) + "\n";
+
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        _daemonPending.delete(id);
+        reject(new Error(`Daemon command "${cmd}" timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      _daemonPending.set(id, { resolve, reject, timer });
+      _daemonProc.stdin.write(req);
+    });
+  }
+
+  // Fallback for commands not yet supported by daemon
   async function mgExec(args, timeoutMs = 30000) {
     const { writeFileSync, unlinkSync } = await import("node:fs");
     const { execFile } = await import("node:child_process");
@@ -2460,23 +2579,19 @@ except Exception:
     }
   }
 
+  // Start daemon eagerly on server boot
+  try { _startDaemon(); } catch (err) { logger?.warn?.("Could not start Python daemon:", err.message); }
+  app._stopDaemon = _stopDaemon;
+
   app.get("/api/cli/search", async (req, res) => {
     try {
       const { q, limit = 10 } = req.query;
       if (!q) return res.status(400).json({ error: "Missing query parameter 'q'" });
-      const jsonOutput = await mgExec(["search", q, "--limit", String(limit), "--json"], 60000);
 
-      let parsed;
-      try {
-        parsed = JSON.parse(jsonOutput);
-      } catch {
-        // Fallback to raw text if JSON parse fails
-        const textOutput = await mgExec(["search", q, "--limit", String(limit)], 60000);
-        return res.json({ output: textOutput });
-      }
-
-      const edges = parsed.edges || [];
-      const entities = parsed.entities || [];
+      const resp = await mgDaemon("search", { query: q, limit: Number(limit), json_output: true }, 60000);
+      const data = resp.data || { edges: [], entities: [] };
+      const edges = data.edges || [];
+      const entities = data.entities || [];
 
       // Build human-readable output with entity profiles
       const lines = [];
@@ -2504,12 +2619,20 @@ except Exception:
 
   app.post("/api/cli/store", async (req, res) => {
     try {
-      const { content, source = "agent", project } = req.body || {};
+      const { content, source = "agent", project, async: isAsync } = req.body || {};
       if (!content) return res.status(400).json({ error: "Missing content" });
-      const args = ["add", content, "--source", source];
-      if (project) args.push("--project", project);
-      const output = await mgExec(args, 120000);
-      res.json({ output });
+
+      if (isAsync !== false) {
+        // Default: async — respond immediately, process in background
+        res.json({ output: "Memory store queued.", async: true });
+        mgDaemon("add", { content, source, project: project || undefined }, 120000)
+          .then(resp => logger?.info?.(`MindReader: async store complete — ${(resp.output || "").slice(0, 100)}`))
+          .catch(err => logger?.warn?.(`MindReader: async store failed — ${err.message}`));
+      } else {
+        // Sync mode (async=false): wait for completion
+        const resp = await mgDaemon("add", { content, source, project: project || undefined }, 120000);
+        res.json({ output: resp.output });
+      }
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -2518,8 +2641,8 @@ except Exception:
   app.get("/api/cli/entities", async (req, res) => {
     try {
       const { limit = 30 } = req.query;
-      const output = await mgExec(["entities", "--limit", String(limit)]);
-      res.json({ output });
+      const resp = await mgDaemon("entities", { limit: Number(limit) });
+      res.json({ output: resp.output });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -2529,18 +2652,11 @@ except Exception:
     try {
       const { prompt, limit = 5 } = req.body || {};
       if (!prompt || prompt.length < 10) return res.json({ context: null });
-      const output = await mgExec(["search", prompt, "--limit", String(limit), "--json"], 30000);
 
-      let parsed;
-      try {
-        parsed = JSON.parse(output);
-      } catch {
-        // Fallback: if JSON parse fails, return null
-        return res.json({ context: null });
-      }
-
-      const edges = parsed.edges || [];
-      const entities = parsed.entities || [];
+      const resp = await mgDaemon("search", { query: prompt, limit: Number(limit), json_output: true }, 30000);
+      const data = resp.data || { edges: [], entities: [] };
+      const edges = data.edges || [];
+      const entities = data.entities || [];
       if (edges.length === 0) return res.json({ context: null });
 
       // Build memory lines from edges
@@ -2594,8 +2710,11 @@ except Exception:
       if (lines.length === 0) return res.json({ stored: 0 });
       const conversation = lines.slice(-10).join("\n");
       if (conversation.length < 30) return res.json({ stored: 0 });
-      const output = await mgExec(["add", conversation.slice(0, captureMaxChars), "--source", "auto-capture"], 120000);
-      res.json({ stored: 1, output });
+      const resp = await mgDaemon("add", {
+        content: conversation.slice(0, captureMaxChars),
+        source: "auto-capture",
+      }, 120000);
+      res.json({ stored: 1, output: resp.output });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -2603,7 +2722,9 @@ except Exception:
 
   // SPA fallback — serve index.html for non-API routes
   app.get("*", (req, res) => {
-    if (!req.path.startsWith("/api")) {
+    if (req.path.startsWith("/api")) {
+      res.status(404).json({ error: `Unknown API route: ${req.method} ${req.path}` });
+    } else {
       res.sendFile(path.join(uiDist, "index.html"));
     }
   });
@@ -2914,8 +3035,11 @@ except Exception:
     logger?.info?.(`🧠 MindReader UI: http://localhost:${port}`);
   });
 
-  // Clean up interval when server closes
-  server.on("close", () => clearInterval(autoCatInterval));
+  // Clean up interval and daemon when server closes
+  server.on("close", () => {
+    clearInterval(autoCatInterval);
+    if (app._stopDaemon) app._stopDaemon();
+  });
 
   server.on("error", (err) => {
     if (err.code === "EADDRINUSE") {
