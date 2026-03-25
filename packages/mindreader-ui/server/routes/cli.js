@@ -2,8 +2,10 @@
  * CLI proxy routes — /api/cli/* (used by openclaw-plugin)
  */
 
+import { preprocessStore, preprocessCapture, executePreprocessResult, filterMessages, EXTRACTION_INSTRUCTIONS } from "../lib/preprocessor.js";
+
 export function registerRoutes(app, ctx) {
-  const { logger, mgDaemon } = ctx;
+  const { driver, config, logger, mgDaemon } = ctx;
 
   app.get("/api/cli/search", async (req, res) => {
     try {
@@ -44,16 +46,32 @@ export function registerRoutes(app, ctx) {
       const { content, source = "agent", project, async: isAsync } = req.body || {};
       if (!content) return res.status(400).json({ error: "Missing content" });
 
+      const doWork = async () => {
+        try {
+          const result = await preprocessStore(content, source, project, driver, config, logger);
+          await executePreprocessResult(result, driver, mgDaemon, config, logger);
+          const attrCount = result.entityUpdates.length;
+          const relCount = result.forGraphiti.length;
+          return `Stored: ${attrCount} attribute update(s), ${relCount} relationship(s) to graph.`;
+        } catch (err) {
+          // Degrade: raw Graphiti with custom instructions
+          logger?.warn?.(`Preprocessor failed, degrading: ${err.message}`);
+          const resp = await mgDaemon("add", {
+            content, source, project: project || undefined,
+            custom_instructions: EXTRACTION_INSTRUCTIONS,
+          }, 120000);
+          return resp.output || "Memory stored (degraded).";
+        }
+      };
+
       if (isAsync !== false) {
-        // Default: async — respond immediately, process in background
         res.json({ output: "Memory store queued.", async: true });
-        mgDaemon("add", { content, source, project: project || undefined }, 120000)
-          .then(resp => logger?.info?.(`MindReader: async store complete — ${(resp.output || "").slice(0, 100)}`))
+        doWork()
+          .then(out => logger?.info?.(`MindReader: async store complete — ${out}`))
           .catch(err => logger?.warn?.(`MindReader: async store failed — ${err.message}`));
       } else {
-        // Sync mode (async=false): wait for completion
-        const resp = await mgDaemon("add", { content, source, project: project || undefined }, 120000);
-        res.json({ output: resp.output });
+        const output = await doWork();
+        res.json({ output });
       }
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -112,31 +130,28 @@ export function registerRoutes(app, ctx) {
 
   app.post("/api/cli/capture", async (req, res) => {
     try {
-      const { messages, captureMaxChars = 2000 } = req.body || {};
-      const lines = [];
-      for (const msg of (messages || [])) {
-        if (!msg || typeof msg !== "object") continue;
-        if (msg.role !== "user" && msg.role !== "assistant") continue;
-        const content = typeof msg.content === "string"
-          ? msg.content
-          : Array.isArray(msg.content)
-            ? msg.content.filter(b => b?.type === "text").map(b => b.text).join("\n")
-            : "";
-        if (!content || content.length < 10) continue;
-        const cleaned = content
-          .replace(/<relevant-memories>[\s\S]*?<\/relevant-memories>/g, "")
-          .trim();
-        if (cleaned.length < 10) continue;
-        lines.push(`${msg.role}: ${cleaned.slice(0, 1000)}`);
+      const { messages, captureMaxChars = 4000 } = req.body || {};
+
+      try {
+        const result = await preprocessCapture(messages, driver, config, logger);
+        if (result.entityUpdates.length === 0 && result.forGraphiti.length === 0) {
+          return res.json({ stored: 0, output: "No facts worth storing." });
+        }
+        await executePreprocessResult(result, driver, mgDaemon, config, logger);
+        const total = result.entityUpdates.length + result.forGraphiti.length;
+        res.json({ stored: total, output: `Processed ${total} fact(s).` });
+      } catch (err) {
+        // Degrade: old behavior — concat messages, feed raw to Graphiti
+        logger?.warn?.(`Capture preprocessor failed, degrading: ${err.message}`);
+        const filtered = filterMessages(messages, captureMaxChars);
+        if (filtered.length < 30) return res.json({ stored: 0 });
+        const resp = await mgDaemon("add", {
+          content: filtered.slice(0, captureMaxChars),
+          source: "auto-capture",
+          custom_instructions: EXTRACTION_INSTRUCTIONS,
+        }, 120000);
+        res.json({ stored: 1, output: resp.output });
       }
-      if (lines.length === 0) return res.json({ stored: 0 });
-      const conversation = lines.slice(-10).join("\n");
-      if (conversation.length < 30) return res.json({ stored: 0 });
-      const resp = await mgDaemon("add", {
-        content: conversation.slice(0, captureMaxChars),
-        source: "auto-capture",
-      }, 120000);
-      res.json({ stored: 1, output: resp.output });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
