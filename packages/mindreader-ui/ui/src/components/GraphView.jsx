@@ -30,7 +30,7 @@ function dim(hex, alpha = 0.4) {
 }
 
 const GraphView = forwardRef(function GraphView(
-  { data, colors, onNodeClick, selectedNode, onNodeHover, searchQuery: externalSearchQuery, onSearchSelect },
+  { data, colors, onNodeClick, selectedNode, onNodeHover, searchQuery: externalSearchQuery, onSearchSelect, layout = "force" },
   ref
 ) {
   const containerRef = useRef(null);
@@ -307,10 +307,10 @@ const GraphView = forwardRef(function GraphView(
       graph.setNodeAttribute(node, "origSize", dynamicSize);
     });
 
-    runLayout(graph);
+    applyLayout(graph, layout);
     sigma.refresh();
     sigma.getCamera().animatedReset({ duration: 500 });
-  }, [data, colors]);
+  }, [data, colors, layout]);
 
   return (
     <div style={{ position: "relative", width: "100%", height: "100%" }}>
@@ -437,6 +437,212 @@ function runLayout(graph) {
   for (const key of nodeKeys) {
     graph.setNodeAttribute(key, "x", nodes[key].x);
     graph.setNodeAttribute(key, "y", nodes[key].y);
+  }
+}
+
+// --- ForceAtlas2 layout ---
+let forceAtlas2Module = null;
+import("graphology-layout-forceatlas2").then(mod => {
+  forceAtlas2Module = mod.default || mod;
+}).catch(() => {});
+
+function runForceAtlas2(graph) {
+  if (!forceAtlas2Module) { runLayout(graph); return; }
+  forceAtlas2Module.assign(graph, {
+    iterations: 200,
+    settings: { gravity: 1, scalingRatio: 2, strongGravityMode: false, barnesHutOptimize: graph.order > 200 },
+  });
+}
+
+// --- Radial layout: BFS layers from most-connected node ---
+function runRadialLayout(graph) {
+  const nodeKeys = [];
+  graph.forEachNode(n => nodeKeys.push(n));
+  if (nodeKeys.length === 0) return;
+
+  // Find center: highest degree node
+  let center = nodeKeys[0], maxDeg = 0;
+  for (const n of nodeKeys) {
+    const d = graph.degree(n);
+    if (d > maxDeg) { maxDeg = d; center = n; }
+  }
+
+  // BFS to assign layers
+  const layers = {};
+  layers[center] = 0;
+  const queue = [center];
+  let head = 0;
+  while (head < queue.length) {
+    const cur = queue[head++];
+    graph.forEachNeighbor(cur, (neighbor) => {
+      if (layers[neighbor] === undefined) {
+        layers[neighbor] = layers[cur] + 1;
+        queue.push(neighbor);
+      }
+    });
+  }
+
+  // Assign disconnected nodes to outermost layer + 1
+  const maxLayer = Math.max(0, ...Object.values(layers));
+  for (const n of nodeKeys) {
+    if (layers[n] === undefined) layers[n] = maxLayer + 1;
+  }
+
+  // Group by layer
+  const byLayer = {};
+  for (const n of nodeKeys) {
+    const l = layers[n];
+    if (!byLayer[l]) byLayer[l] = [];
+    byLayer[l].push(n);
+  }
+
+  const layerRadius = 100;
+  for (const [layer, nodes] of Object.entries(byLayer)) {
+    const l = Number(layer);
+    const r = l * layerRadius;
+    nodes.forEach((n, i) => {
+      const angle = (i / nodes.length) * Math.PI * 2;
+      graph.setNodeAttribute(n, "x", r === 0 ? 0 : Math.cos(angle) * r);
+      graph.setNodeAttribute(n, "y", r === 0 ? 0 : Math.sin(angle) * r);
+    });
+  }
+}
+
+// --- Circular layout: nodes distributed by category in sectors ---
+function runCircularLayout(graph) {
+  const groups = {};
+  graph.forEachNode((n, attrs) => {
+    const cat = attrs.category || "other";
+    if (!groups[cat]) groups[cat] = [];
+    groups[cat].push(n);
+  });
+
+  const cats = Object.keys(groups);
+  const sectorAngle = (Math.PI * 2) / (cats.length || 1);
+  const radius = 250;
+
+  cats.forEach((cat, ci) => {
+    const nodes = groups[cat];
+    const sectorStart = ci * sectorAngle;
+    nodes.forEach((n, ni) => {
+      const angle = sectorStart + (ni / nodes.length) * sectorAngle;
+      graph.setNodeAttribute(n, "x", Math.cos(angle) * radius);
+      graph.setNodeAttribute(n, "y", Math.sin(angle) * radius);
+    });
+  });
+}
+
+// --- Cluster layout: categories at polygon vertices, mini force within ---
+function runClusterLayout(graph) {
+  const groups = {};
+  graph.forEachNode((n, attrs) => {
+    const cat = attrs.category || "other";
+    if (!groups[cat]) groups[cat] = [];
+    groups[cat].push(n);
+  });
+
+  const cats = Object.keys(groups);
+  const outerRadius = 300;
+
+  // Assign each category a center on a regular polygon
+  const centers = {};
+  cats.forEach((cat, i) => {
+    const angle = (i / cats.length) * Math.PI * 2 - Math.PI / 2;
+    centers[cat] = { x: Math.cos(angle) * outerRadius, y: Math.sin(angle) * outerRadius };
+  });
+
+  // Place nodes in spiral around their category center, then mini force
+  for (const cat of cats) {
+    const nodes = groups[cat];
+    const cx = centers[cat].x, cy = centers[cat].y;
+    const pos = {};
+
+    // Initial spiral placement
+    nodes.forEach((n, i) => {
+      const angle = i * 0.8;
+      const r = 10 + i * 4;
+      pos[n] = { x: cx + Math.cos(angle) * r, y: cy + Math.sin(angle) * r, vx: 0, vy: 0 };
+    });
+
+    // Mini force: 50 iterations, nodes repel each other, gravity to center
+    for (let iter = 0; iter < 50; iter++) {
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const a = pos[nodes[i]], b = pos[nodes[j]];
+          const dx = b.x - a.x, dy = b.y - a.y;
+          const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+          const force = 400 / (dist * dist);
+          const fx = (dx / dist) * force, fy = (dy / dist) * force;
+          a.vx -= fx; a.vy -= fy; b.vx += fx; b.vy += fy;
+        }
+      }
+      for (const n of nodes) {
+        const p = pos[n];
+        p.vx -= (p.x - cx) * 0.01;
+        p.vy -= (p.y - cy) * 0.01;
+        p.vx *= 0.85; p.vy *= 0.85;
+        p.x += p.vx; p.y += p.vy;
+      }
+    }
+
+    for (const n of nodes) {
+      graph.setNodeAttribute(n, "x", pos[n].x);
+      graph.setNodeAttribute(n, "y", pos[n].y);
+    }
+  }
+}
+
+// --- Grid layout: nodes in grids grouped by category ---
+function runGridLayout(graph) {
+  const groups = {};
+  graph.forEachNode((n, attrs) => {
+    const cat = attrs.category || "other";
+    if (!groups[cat]) groups[cat] = [];
+    groups[cat].push(n);
+  });
+
+  const cats = Object.keys(groups).sort((a, b) => groups[b].length - groups[a].length);
+  const cellSize = 35;
+  const groupGap = 120;
+  let offsetX = 0;
+
+  for (const cat of cats) {
+    const nodes = groups[cat];
+    const cols = Math.max(1, Math.ceil(Math.sqrt(nodes.length)));
+    nodes.forEach((n, i) => {
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      graph.setNodeAttribute(n, "x", offsetX + col * cellSize);
+      graph.setNodeAttribute(n, "y", row * cellSize);
+    });
+    const rows = Math.ceil(nodes.length / cols);
+    offsetX += cols * cellSize + groupGap;
+  }
+
+  // Center the whole grid
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  graph.forEachNode((n, attrs) => {
+    if (attrs.x < minX) minX = attrs.x;
+    if (attrs.x > maxX) maxX = attrs.x;
+    if (attrs.y < minY) minY = attrs.y;
+    if (attrs.y > maxY) maxY = attrs.y;
+  });
+  const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+  graph.forEachNode((n, attrs) => {
+    graph.setNodeAttribute(n, "x", attrs.x - cx);
+    graph.setNodeAttribute(n, "y", attrs.y - cy);
+  });
+}
+
+// --- Layout dispatcher ---
+function applyLayout(graph, layout) {
+  switch (layout) {
+    case "forceatlas2": runForceAtlas2(graph); break;
+    case "radial": runRadialLayout(graph); break;
+    case "circular": runCircularLayout(graph); break;
+    case "cluster": runClusterLayout(graph); break;
+    case "grid": runGridLayout(graph); break;
+    default: runLayout(graph); break;
   }
 }
 

@@ -71,6 +71,7 @@ Explore your memories as an interactive force-directed graph. Nodes represent en
 - Color-coded by category (person, project, company, etc.)
 - Hover for quick preview with category, tags, and summary
 - Filter by category to focus on what matters
+- **6 layout modes** — switch between Force, ForceAtlas2, Radial, Circular, Cluster, and Grid layouts via the layout selector
 
 ![Graph Visualization](docs/images/mind%20graph%20view.png)
 *Interactive force-directed graph — nodes are color-coded by category and sized by connection count. Click any node to open the detail panel on the right.*

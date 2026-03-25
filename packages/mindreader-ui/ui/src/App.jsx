@@ -35,6 +35,7 @@ export default function App() {
   const [hoveredNode, setHoveredNode] = useState(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
   const [hiddenTypes, setHiddenTypes] = useState(new Set());
+  const [graphLayout, setGraphLayout] = useState("force");
   const [refreshKey, setRefreshKey] = useState(0);
   const [dynamicCategories, setDynamicCategories] = useState(null);
   const graphRef = useRef();
@@ -267,6 +268,42 @@ export default function App() {
 
             {activeTab === "graph" && (
               <div className="graph-wrapper">
+                {/* Layout selector */}
+                <div style={{
+                  position: "absolute", bottom: 16, right: 16, zIndex: 100,
+                  background: "rgba(10, 10, 26, 0.85)", backdropFilter: "blur(12px)",
+                  border: "1px solid rgba(74, 158, 255, 0.15)", borderRadius: 10,
+                  padding: "8px 10px", display: "flex", flexDirection: "column", gap: 3,
+                  boxShadow: "0 4px 16px rgba(0,0,0,0.4)", minWidth: 110,
+                }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-secondary)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 2 }}>
+                    Layout
+                  </span>
+                  {[
+                    { id: "force", label: "Force", icon: "\u{2B55}" },
+                    { id: "forceatlas2", label: "Atlas", icon: "\u{1F30A}" },
+                    { id: "radial", label: "Radial", icon: "\u{1F3AF}" },
+                    { id: "circular", label: "Circular", icon: "\u{1F504}" },
+                    { id: "cluster", label: "Cluster", icon: "\u{2B50}" },
+                    { id: "grid", label: "Grid", icon: "\u{1F4CB}" },
+                  ].map(l => (
+                    <div
+                      key={l.id}
+                      onClick={() => setGraphLayout(l.id)}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 6,
+                        padding: "4px 6px", borderRadius: 6, cursor: "pointer",
+                        background: graphLayout === l.id ? "rgba(74, 158, 255, 0.15)" : "transparent",
+                        color: graphLayout === l.id ? "#4a9eff" : "var(--text-primary)",
+                        fontSize: 12, transition: "background 0.15s, color 0.15s",
+                      }}
+                    >
+                      <span style={{ fontSize: 13, width: 18, textAlign: "center" }}>{l.icon}</span>
+                      <span>{l.label}</span>
+                    </div>
+                  ))}
+                </div>
+                {/* Categories filter */}
                 <div style={{
                   position: "absolute", bottom: 16, left: 16, zIndex: 100,
                   background: "rgba(10, 10, 26, 0.85)", backdropFilter: "blur(12px)",
@@ -325,6 +362,7 @@ export default function App() {
                   selectedNode={selectedNode}
                   searchQuery={searchQuery}
                   onSearchSelect={() => setSearchQuery("")}
+                  layout={graphLayout}
                 />
                 {hoveredNode && !selectedNode && (
                   <HoverTooltip node={hoveredNode} position={tooltipPos} />
