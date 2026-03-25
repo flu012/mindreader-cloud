@@ -1,0 +1,120 @@
+/**
+ * Graph routes — GET /api/graph
+ */
+import neo4j from "neo4j-driver";
+import { query, nodeToPlain } from "../neo4j.js";
+import { categorizeNode } from "../lib/categorizer.js";
+
+export function registerRoutes(app, ctx) {
+  const { driver, logger } = ctx;
+
+  /**
+   * GET /api/graph — Full graph data for visualization
+   * Query params: ?project=X&type=Entity&limit=500
+   */
+  app.get("/api/graph", async (req, res) => {
+    try {
+      const { project, type, limit = 500 } = req.query;
+      const maxLimit = Math.min(parseInt(limit) || 500, 2000);
+
+      let nodeCypher, linkCypher;
+
+      if (project) {
+        // Filter by project: find entities related to the project
+        nodeCypher = `
+          MATCH (e:Entity)
+          WHERE toLower(e.name) CONTAINS toLower($project)
+             OR toLower(e.summary) CONTAINS toLower($project)
+          WITH collect(e) AS projectNodes
+          UNWIND projectNodes AS pn
+          OPTIONAL MATCH (pn)-[r:RELATES_TO]-(connected:Entity)
+          WITH projectNodes, collect(connected) AS connectedNodes
+          UNWIND projectNodes + connectedNodes AS n
+          RETURN DISTINCT n LIMIT $limit
+        `;
+        linkCypher = `
+          MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity)
+          WHERE (toLower(a.name) CONTAINS toLower($project)
+             OR toLower(a.summary) CONTAINS toLower($project)
+             OR toLower(b.name) CONTAINS toLower($project)
+             OR toLower(b.summary) CONTAINS toLower($project))
+            AND r.expired_at IS NULL
+          RETURN a.uuid AS source, b.uuid AS target,
+                 r.name AS label, r.fact AS fact,
+                 r.created_at AS created_at, r.valid_at AS valid_at
+          LIMIT $limit
+        `;
+      } else {
+        // All entities — prioritize non-"other" categories for better visualization
+        // First get non-other entities, then fill with other if needed
+        const allowedTypes = ["Entity", "Episodic", "Community", "Saga"];
+        const safeType = allowedTypes.includes(type) ? type : "Entity";
+
+        if (!type || safeType === "Entity") {
+          // Fetch entities up to a safe limit, sort in JS after categorization
+          nodeCypher = `MATCH (n:Entity) RETURN n LIMIT 5000`;
+        } else {
+          nodeCypher = `MATCH (n:${safeType}) RETURN n LIMIT $limit`;
+        }
+
+        linkCypher = `
+          MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity)
+          WHERE r.expired_at IS NULL
+          RETURN a.uuid AS source, b.uuid AS target,
+                 r.name AS label, r.fact AS fact,
+                 r.created_at AS created_at, r.valid_at AS valid_at
+          LIMIT $limit
+        `;
+      }
+
+      const params = { project: project || "", limit: neo4j.int(maxLimit) };
+
+      const nodeRecords = await query(driver, nodeCypher, params);
+      const linkRecords = await query(driver, linkCypher, params);
+
+      // Build nodes array with JS-side categorization
+      let allNodes = nodeRecords.map((rec) => {
+        const n = rec.n ? nodeToPlain(rec.n) : rec;
+        return {
+          id: n.uuid || n._id,
+          name: n.name || "unknown",
+          summary: n.summary || "",
+          labels: n._labels || ["Entity"],
+          category: categorizeNode(n),
+          tags: Array.isArray(n.tags) ? n.tags : [],
+          node_type: n.node_type || "normal",
+          created_at: n.created_at,
+        };
+      });
+
+      // Smart sampling: prioritize non-"other" categories, then fill with "other"
+      const nonOther = allNodes.filter((n) => n.category !== "other");
+      const other = allNodes.filter((n) => n.category === "other");
+      // Sort non-other by created_at desc, take all of them first
+      nonOther.sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+      other.sort((a, b) => (b.created_at || "").localeCompare(a.created_at || ""));
+      // Take all non-other + fill remaining slots with other
+      const remaining = Math.max(0, maxLimit - nonOther.length);
+      const nodes = [...nonOther, ...other.slice(0, remaining)].slice(0, maxLimit);
+
+      // Build node ID set for filtering valid links
+      const nodeIds = new Set(nodes.map((n) => n.id));
+
+      // Build links array
+      const links = linkRecords
+        .filter((rec) => nodeIds.has(rec.source) && nodeIds.has(rec.target))
+        .map((rec) => ({
+          source: rec.source,
+          target: rec.target,
+          label: rec.label || "",
+          fact: rec.fact || "",
+          created_at: rec.created_at,
+        }));
+
+      res.json({ nodes, links });
+    } catch (err) {
+      logger?.error?.(`MindReader API error: ${err.message}`);
+      res.status(500).json({ error: err.message });
+    }
+  });
+}

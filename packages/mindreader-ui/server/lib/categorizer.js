@@ -17,8 +17,8 @@ import { query } from "../neo4j.js";
 let cachedCategories = null;
 let categoryCacheTime = 0;
 
-async function getCategories(driver) {
-  if (cachedCategories && Date.now() - categoryCacheTime < 60000) return cachedCategories;
+async function getCategories(driver, forceRefresh = false) {
+  if (!forceRefresh && cachedCategories && Date.now() - categoryCacheTime < 60000) return cachedCategories;
   try {
     const results = await query(driver, "MATCH (c:Category) RETURN c ORDER BY c.order");
     cachedCategories = results.map((r) => {
