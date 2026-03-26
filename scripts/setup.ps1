@@ -346,6 +346,22 @@ function Step-LLM {
 function Verify-Neo4j {
     Write-Info "Testing Neo4j connection at $($script:Neo4jUri)..."
 
+    # Method 1: Try curl/Invoke-WebRequest to Neo4j HTTP API (no dependencies needed)
+    $httpUri = $script:Neo4jUri -replace '^bolt://', 'http://' -replace ':7687', ':7474'
+    try {
+        $cred = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($script:Neo4jUser):$($script:Neo4jPassword)"))
+        $headers = @{ "Authorization" = "Basic $cred"; "Content-Type" = "application/json" }
+        $body = '{"statements":[{"statement":"RETURN 1"}]}'
+        $response = Invoke-WebRequest -Uri "$httpUri/db/neo4j/tx/commit" -Method POST -Headers $headers -Body $body -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
+        if ($response.StatusCode -eq 200) {
+            Write-Success "Neo4j connection verified."
+            return $true
+        }
+    } catch {
+        # Fall through to method 2
+    }
+
+    # Method 2: Try via Node.js neo4j-driver (if node_modules already installed)
     $node = Get-Command node -ErrorAction SilentlyContinue
     if ($node) {
         $neo4jMod = Join-Path $RepoRoot "node_modules\neo4j-driver"

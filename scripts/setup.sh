@@ -435,14 +435,29 @@ verify_neo4j() {
     info "Testing Neo4j connection at ${NEO4J_URI}..."
     local ok=false
 
-    # Try cypher-shell first
-    if command -v cypher-shell &>/dev/null; then
+    # Method 1: Try curl to Neo4j HTTP API (no dependencies needed)
+    local http_uri="${NEO4J_URI/bolt:\/\//http://}"
+    http_uri="${http_uri/:7687/:7474}"
+    if command -v curl &>/dev/null; then
+        local http_status
+        http_status="$(curl -s -o /dev/null -w "%{http_code}" \
+            -u "${NEO4J_USER}:${NEO4J_PASSWORD}" \
+            -H "Content-Type: application/json" \
+            -d '{"statements":[{"statement":"RETURN 1"}]}' \
+            "${http_uri}/db/neo4j/tx/commit" 2>/dev/null)" || true
+        if [[ "$http_status" == "200" ]]; then
+            ok=true
+        fi
+    fi
+
+    # Method 2: Try cypher-shell
+    if [[ "$ok" == "false" ]] && command -v cypher-shell &>/dev/null; then
         if echo "RETURN 1;" | cypher-shell -u "$NEO4J_USER" -p "$NEO4J_PASSWORD" -a "$NEO4J_URI" 2>/dev/null; then
             ok=true
         fi
     fi
 
-    # Fallback: try via Node.js (only if neo4j-driver is installed)
+    # Method 3: Try via Node.js (only if neo4j-driver is installed)
     if [[ "$ok" == "false" ]] && command -v node &>/dev/null; then
         local neo4j_mod="$REPO_ROOT/node_modules/neo4j-driver"
         if [[ -d "$neo4j_mod" ]]; then
