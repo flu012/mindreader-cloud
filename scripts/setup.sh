@@ -87,6 +87,113 @@ BANNER
 }
 
 # ---------------------------------------------------------------------------
+# Prerequisite check
+# ---------------------------------------------------------------------------
+check_prerequisites() {
+    separator
+    echo -e "${BOLD}Checking Prerequisites${RESET}"
+    separator
+    echo
+
+    local all_ok=true
+
+    # Node.js
+    if command -v node &>/dev/null; then
+        local node_ver
+        node_ver="$(node -v 2>/dev/null | sed 's/^v//')"
+        local node_major="${node_ver%%.*}"
+        if [[ "$node_major" -ge 18 ]]; then
+            success "Node.js ${node_ver}"
+        else
+            error "Node.js ${node_ver} — version 18+ required"
+            echo "  Install: https://nodejs.org/en/download"
+            echo "  Or via nvm: nvm install 18"
+            all_ok=false
+        fi
+    else
+        error "Node.js — not found"
+        echo "  Install: https://nodejs.org/en/download"
+        echo "  macOS:   brew install node"
+        echo "  Ubuntu:  curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt install -y nodejs"
+        all_ok=false
+    fi
+
+    # npm (should come with Node but check separately)
+    if command -v npm &>/dev/null; then
+        success "npm $(npm -v 2>/dev/null)"
+    else
+        error "npm — not found (should be installed with Node.js)"
+        all_ok=false
+    fi
+
+    # Python
+    local py_cmd=""
+    if command -v python3 &>/dev/null; then
+        py_cmd="python3"
+    elif command -v python &>/dev/null; then
+        py_cmd="python"
+    fi
+
+    if [[ -n "$py_cmd" ]]; then
+        local py_ver
+        py_ver="$($py_cmd --version 2>&1 | grep -oP '\d+\.\d+')"
+        local py_major="${py_ver%%.*}"
+        local py_minor="${py_ver#*.}"
+        if [[ "$py_major" -ge 3 ]] && [[ "$py_minor" -ge 11 ]]; then
+            success "Python ${py_ver} ($py_cmd)"
+        else
+            error "Python ${py_ver} — version 3.11+ required"
+            echo "  Install: https://www.python.org/downloads/"
+            echo "  macOS:   brew install python@3.12"
+            echo "  Ubuntu:  sudo apt install python3.12 python3.12-venv"
+            all_ok=false
+        fi
+    else
+        error "Python — not found"
+        echo "  Install: https://www.python.org/downloads/"
+        echo "  macOS:   brew install python@3.12"
+        echo "  Ubuntu:  sudo apt install python3.12 python3.12-venv"
+        all_ok=false
+    fi
+
+    # Docker
+    if command -v docker &>/dev/null; then
+        local docker_ver
+        docker_ver="$(docker --version 2>/dev/null | grep -oP '\d+\.\d+\.\d+')"
+        if docker info &>/dev/null 2>&1; then
+            success "Docker ${docker_ver} (daemon running)"
+        else
+            warn "Docker ${docker_ver} (daemon NOT running)"
+            echo "  Start Docker Desktop or: sudo systemctl start docker"
+            echo "  You can skip Docker if you have an existing Neo4j instance."
+        fi
+    else
+        warn "Docker — not found"
+        echo "  Install: https://docs.docker.com/get-docker/"
+        echo "  You can skip Docker if you have an existing Neo4j 5.x instance."
+    fi
+
+    # Git (nice to have)
+    if command -v git &>/dev/null; then
+        success "git $(git --version 2>/dev/null | grep -oP '\d+\.\d+\.\d+')"
+    fi
+
+    echo
+    if [[ "$all_ok" == "false" ]]; then
+        error "Some required prerequisites are missing (see above)."
+        echo
+        if ! ask_yn "Continue setup anyway?" "N"; then
+            info "Please install the missing prerequisites and re-run: npm run setup"
+            exit 1
+        fi
+        echo
+    else
+        success "All prerequisites satisfied!"
+        echo
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Detect existing config
 # ---------------------------------------------------------------------------
 handle_existing_env() {
@@ -677,6 +784,7 @@ print_summary() {
 main() {
     print_banner
 
+    check_prerequisites
     handle_existing_env
 
     step_components

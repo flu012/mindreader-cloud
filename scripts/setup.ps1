@@ -625,9 +625,124 @@ function Print-Summary {
 }
 
 # ---------------------------------------------------------------------------
+# Prerequisite check
+# ---------------------------------------------------------------------------
+function Check-Prerequisites {
+    Write-Separator
+    Write-Host "Checking Prerequisites" -ForegroundColor White
+    Write-Separator
+    Write-Host ""
+
+    $allOk = $true
+
+    # Node.js
+    $node = Get-Command node -ErrorAction SilentlyContinue
+    if ($node) {
+        $nodeVer = (node -v) -replace '^v', ''
+        $nodeMajor = [int]($nodeVer.Split('.')[0])
+        if ($nodeMajor -ge 18) {
+            Write-Success "Node.js $nodeVer"
+        } else {
+            Write-Err "Node.js $nodeVer - version 18+ required"
+            Write-Host "  Install: https://nodejs.org/en/download"
+            Write-Host "  Or via winget: winget install OpenJS.NodeJS.LTS"
+            $allOk = $false
+        }
+    } else {
+        Write-Err "Node.js - not found"
+        Write-Host "  Install: https://nodejs.org/en/download"
+        Write-Host "  Or via winget: winget install OpenJS.NodeJS.LTS"
+        Write-Host "  Or via choco:  choco install nodejs-lts"
+        $allOk = $false
+    }
+
+    # npm
+    $npm = Get-Command npm -ErrorAction SilentlyContinue
+    if ($npm) {
+        Write-Success "npm $(npm -v)"
+    } else {
+        Write-Err "npm - not found (should be installed with Node.js)"
+        $allOk = $false
+    }
+
+    # Python
+    $py = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $py) { $py = Get-Command python3 -ErrorAction SilentlyContinue }
+    if ($py) {
+        $pyVerStr = & $py.Source --version 2>&1
+        if ($pyVerStr -match '(\d+)\.(\d+)') {
+            $pyMajor = [int]$Matches[1]
+            $pyMinor = [int]$Matches[2]
+            if ($pyMajor -ge 3 -and $pyMinor -ge 11) {
+                Write-Success "Python $pyMajor.$pyMinor ($($py.Source))"
+            } else {
+                Write-Err "Python $pyMajor.$pyMinor - version 3.11+ required"
+                Write-Host "  Install: https://www.python.org/downloads/"
+                Write-Host "  Or via winget: winget install Python.Python.3.12"
+                Write-Host "  IMPORTANT: Check 'Add python.exe to PATH' during install"
+                $allOk = $false
+            }
+        }
+    } else {
+        Write-Err "Python - not found"
+        Write-Host "  Install: https://www.python.org/downloads/"
+        Write-Host "  Or via winget: winget install Python.Python.3.12"
+        Write-Host "  Or via choco:  choco install python312"
+        Write-Host "  IMPORTANT: Check 'Add python.exe to PATH' during install"
+        $allOk = $false
+    }
+
+    # Docker
+    $docker = Get-Command docker -ErrorAction SilentlyContinue
+    if ($docker) {
+        $dockerVer = (docker --version) -replace 'Docker version\s*', '' -replace ',.*', ''
+        try {
+            docker info 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                Write-Success "Docker $dockerVer (daemon running)"
+            } else {
+                Write-Warn "Docker $dockerVer (daemon NOT running)"
+                Write-Host "  Start Docker Desktop from the Start menu or system tray"
+                Write-Host "  You can skip Docker if you have an existing Neo4j instance."
+            }
+        } catch {
+            Write-Warn "Docker $dockerVer (daemon NOT running)"
+            Write-Host "  Start Docker Desktop from the Start menu or system tray"
+        }
+    } else {
+        Write-Warn "Docker - not found"
+        Write-Host "  Install: https://docs.docker.com/desktop/install/windows-install/"
+        Write-Host "  Or via winget: winget install Docker.DockerDesktop"
+        Write-Host "  You can skip Docker if you have an existing Neo4j 5.x instance."
+    }
+
+    # Git
+    $git = Get-Command git -ErrorAction SilentlyContinue
+    if ($git) {
+        $gitVer = (git --version) -replace 'git version\s*', '' -replace '\.windows.*', ''
+        Write-Success "git $gitVer"
+    }
+
+    Write-Host ""
+    if (-not $allOk) {
+        Write-Err "Some required prerequisites are missing (see above)."
+        Write-Host ""
+        if (-not (Ask-YN "Continue setup anyway?" "N")) {
+            Write-Info "Please install the missing prerequisites and re-run: npm run setup"
+            exit 1
+        }
+        Write-Host ""
+    } else {
+        Write-Success "All prerequisites satisfied!"
+        Write-Host ""
+    }
+}
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 Print-Banner
+Check-Prerequisites
 Handle-ExistingEnv
 Step-Components
 Step-Neo4j
