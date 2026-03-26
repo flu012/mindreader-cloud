@@ -174,26 +174,15 @@ MindReader is built as a first-class [OpenClaw](https://github.com/openclaw) ext
 ## Quick Start
 
 ```bash
-# Clone the repo
 git clone https://github.com/flu012/mindreaderv2.git
 cd mindreaderv2
-
-# Run the interactive setup wizard
-./scripts/setup.sh
-
-# Start the server
-npm start
+npm run setup    # Interactive wizard — Neo4j, LLM, embedder, OpenClaw plugin
+npm start        # http://localhost:18900
 ```
 
-Open `http://localhost:18900` to access the web UI.
+**Requirements:** Node.js 18+, Python 3.11+, Docker (for Neo4j), an LLM API key.
 
-## Requirements
-
-- Node.js 18+
-- Python 3.11+
-- Neo4j 5.x (Docker setup included, or bring your own)
-- An LLM API key (OpenAI, Anthropic, or DashScope)
-- For self-evolution: a web-search-capable model (e.g. Qwen qwen3.5-plus via DashScope)
+> **[Full installation guide →](docs/quickstart.md)** — step-by-step walkthrough, provider comparison, OpenClaw integration, troubleshooting.
 
 ## Architecture
 
