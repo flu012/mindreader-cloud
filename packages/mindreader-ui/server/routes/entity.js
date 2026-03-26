@@ -187,15 +187,21 @@ Write a 200-word summary:`;
       const extractModel = config.llmExtractModel || config.llmModel;
       const pyScript = `
 import os, json
-from openai import OpenAI
-client = OpenAI(api_key=os.getenv("LLM_API_KEY"), base_url=os.getenv("LLM_BASE_URL"))
 with open(os.getenv("MG_PROMPT_FILE")) as f:
     prompt = json.load(f)
-kwargs = dict(model=os.getenv("MG_MODEL", "gpt-4o-mini"), messages=[{"role": "user", "content": prompt}], temperature=0.3, max_tokens=400)
-if "dashscope" in (os.getenv("LLM_BASE_URL") or ""):
-    kwargs["extra_body"] = {"enable_thinking": False}
-resp = client.chat.completions.create(**kwargs)
-print(resp.choices[0].message.content.strip())
+if os.getenv("LLM_PROVIDER", "").lower() == "anthropic":
+    import anthropic
+    client = anthropic.Anthropic(api_key=os.getenv("LLM_API_KEY"))
+    resp = client.messages.create(model=os.getenv("MG_MODEL", "claude-sonnet-4-6"), messages=[{"role": "user", "content": prompt}], temperature=0.3, max_tokens=400)
+    print(resp.content[0].text.strip())
+else:
+    from openai import OpenAI
+    client = OpenAI(api_key=os.getenv("LLM_API_KEY"), base_url=os.getenv("LLM_BASE_URL"))
+    kwargs = dict(model=os.getenv("MG_MODEL", "gpt-4o-mini"), messages=[{"role": "user", "content": prompt}], temperature=0.3, max_tokens=400)
+    if "dashscope" in (os.getenv("LLM_BASE_URL") or ""):
+        kwargs["extra_body"] = {"enable_thinking": False}
+    resp = client.chat.completions.create(**kwargs)
+    print(resp.choices[0].message.content.strip())
 `;
 
       const tmpScript = `/tmp/mg_summarize_${Date.now()}_${sumUid}.py`;
@@ -204,6 +210,7 @@ print(resp.choices[0].message.content.strip())
       const pyEnv = { ...process.env, PYTHONUNBUFFERED: "1" };
       if (config.llmApiKey) pyEnv.LLM_API_KEY = config.llmApiKey;
       if (config.llmBaseUrl) pyEnv.LLM_BASE_URL = config.llmBaseUrl;
+      if (config.llmProvider) pyEnv.LLM_PROVIDER = config.llmProvider;
       pyEnv.MG_PROMPT_FILE = tmpPrompt;
       pyEnv.MG_MODEL = extractModel;
 
@@ -359,28 +366,53 @@ You may include reasoning text between these lines. Aim for 10-25 entities and t
       const evolveModel = config.llmEvolveModel || config.llmModel;
       const baseUrl = (config.llmBaseUrl || "https://api.openai.com/v1").replace(/\/+$/, "");
       const isDashscope = baseUrl.includes("dashscope");
+      const isAnthropic = config.llmProvider === "anthropic";
 
-      const requestBody = {
-        model: evolveModel,
-        messages: [{ role: "user", content: llmPrompt }],
-        temperature: 0.5,
-        max_tokens: 8000,
-        stream: true,
-      };
-      if (isDashscope) {
-        requestBody.enable_thinking = false;
-        requestBody.enable_search = true;
+      let streamEndpoint, requestBody, requestHeaders;
+
+      if (isAnthropic) {
+        const anthropicBase = (config.llmBaseUrl || "https://api.anthropic.com/v1").replace(/\/+$/, "");
+        streamEndpoint = `${anthropicBase}/messages`;
+        requestBody = {
+          model: evolveModel,
+          messages: [{ role: "user", content: llmPrompt }],
+          temperature: 0.5,
+          max_tokens: 8000,
+          stream: true,
+        };
+        requestHeaders = {
+          "Content-Type": "application/json",
+          "x-api-key": config.llmApiKey,
+          "anthropic-version": "2023-06-01",
+        };
       } else {
-        requestBody.stream_options = { include_usage: true };
+        streamEndpoint = `${baseUrl}/chat/completions`;
+        requestBody = {
+          model: evolveModel,
+          messages: [{ role: "user", content: llmPrompt }],
+          temperature: 0.5,
+          max_tokens: 8000,
+          stream: true,
+        };
+        if (isDashscope) {
+          requestBody.enable_thinking = false;
+          requestBody.enable_search = true;
+        } else {
+          requestBody.stream_options = { include_usage: true };
+        }
+        requestHeaders = {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${config.llmApiKey}`,
+        };
       }
 
-      logger?.info?.(`[evolve] Starting for "${name}" model=${evolveModel} baseURL=${baseUrl}`);
+      logger?.info?.(`[evolve] Starting for "${name}" model=${evolveModel} provider=${config.llmProvider}`);
 
       const abortCtrl = new AbortController();
       streamController = abortCtrl;
 
       // Use http/https module for reliable streaming (Node.js native fetch can buffer SSE)
-      const streamUrl = new URL(`${baseUrl}/chat/completions`);
+      const streamUrl = new URL(streamEndpoint);
       const isHttps = streamUrl.protocol === "https:";
       const { request: httpRequest } = await import(isHttps ? "node:https" : "node:http");
       const postData = JSON.stringify(requestBody);
@@ -394,17 +426,68 @@ You may include reasoning text between these lines. Aim for 10-25 entities and t
       let rawChunkCount = 0;
       let dataLineCount = 0;
 
+      // Extract text delta from an SSE chunk (handles both OpenAI and Anthropic formats)
+      function extractTextAndUsage(chunk) {
+        if (isAnthropic) {
+          // Anthropic: usage in message_start and message_delta events
+          if (chunk.type === "message_start" && chunk.message?.usage) {
+            totalUsage = totalUsage || { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+            totalUsage.promptTokens = chunk.message.usage.input_tokens || 0;
+          }
+          if (chunk.type === "message_delta" && chunk.usage) {
+            totalUsage = totalUsage || { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+            totalUsage.completionTokens = chunk.usage.output_tokens || 0;
+            totalUsage.totalTokens = totalUsage.promptTokens + totalUsage.completionTokens;
+          }
+          // Content delta
+          if (chunk.type === "content_block_delta" && chunk.delta?.text) {
+            return chunk.delta.text;
+          }
+          return "";
+        } else {
+          // OpenAI-compatible format
+          if (chunk.usage) {
+            totalUsage = {
+              promptTokens: chunk.usage.prompt_tokens || 0,
+              completionTokens: chunk.usage.completion_tokens || 0,
+              totalTokens: chunk.usage.total_tokens || 0,
+            };
+          }
+          return chunk.choices?.[0]?.delta?.content || "";
+        }
+      }
+
+      function processLineBuffer(text) {
+        lineBuffer += text;
+        const lines = lineBuffer.split("\n");
+        lineBuffer = lines.pop();
+
+        for (const ln of lines) {
+          const trimmed = ln.trim();
+          if (trimmed.startsWith("[ENTITY]")) {
+            try {
+              const entity = JSON.parse(trimmed.slice("[ENTITY]".length).trim());
+              entityCount++;
+              sendSSE("entity", entity);
+            } catch {}
+          } else if (trimmed.startsWith("[REL]")) {
+            try {
+              const rel = JSON.parse(trimmed.slice("[REL]".length).trim());
+              relationshipCount++;
+              sendSSE("relationship", rel);
+            } catch {}
+          }
+        }
+      }
+
       await new Promise((resolveStream, rejectStream) => {
+        requestHeaders["Content-Length"] = Buffer.byteLength(postData);
         const httpReq = httpRequest({
           hostname: streamUrl.hostname,
           port: streamUrl.port || (isHttps ? 443 : 80),
           path: streamUrl.pathname,
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${config.llmApiKey}`,
-            "Content-Length": Buffer.byteLength(postData),
-          },
+          headers: requestHeaders,
         }, (llmResponse) => {
           logger?.info?.(`[evolve] LLM response status: ${llmResponse.statusCode}`);
 
@@ -426,45 +509,19 @@ You may include reasoning text between these lines. Aim for 10-25 entities and t
           for (const line of sseMessages) {
             const trimmedLine = line.trim();
             if (!trimmedLine || trimmedLine === "data: [DONE]") continue;
+            // Anthropic uses "event: " lines — skip those
+            if (trimmedLine.startsWith("event:")) continue;
             if (!trimmedLine.startsWith("data: ")) continue;
             dataLineCount++;
 
             let chunk;
             try { chunk = JSON.parse(trimmedLine.slice(6)); } catch { continue; }
 
-            if (chunk.usage) {
-              totalUsage = {
-                promptTokens: chunk.usage.prompt_tokens || 0,
-                completionTokens: chunk.usage.completion_tokens || 0,
-                totalTokens: chunk.usage.total_tokens || 0,
-              };
-            }
-
-            const text = chunk.choices?.[0]?.delta?.content || "";
+            const text = extractTextAndUsage(chunk);
             if (!text) continue;
 
             sendSSE("token", { text });
-
-            lineBuffer += text;
-            const lines = lineBuffer.split("\n");
-            lineBuffer = lines.pop();
-
-            for (const ln of lines) {
-              const trimmed = ln.trim();
-              if (trimmed.startsWith("[ENTITY]")) {
-                try {
-                  const entity = JSON.parse(trimmed.slice("[ENTITY]".length).trim());
-                  entityCount++;
-                  sendSSE("entity", entity);
-                } catch {}
-              } else if (trimmed.startsWith("[REL]")) {
-                try {
-                  const rel = JSON.parse(trimmed.slice("[REL]".length).trim());
-                  relationshipCount++;
-                  sendSSE("relationship", rel);
-                } catch {}
-              }
-            }
+            processLineBuffer(text);
           }
         });
 
@@ -475,17 +532,10 @@ You may include reasoning text between these lines. Aim for 10-25 entities and t
             if (trimmedSse.startsWith("data: ") && trimmedSse !== "data: [DONE]") {
               try {
                 const chunk = JSON.parse(trimmedSse.slice(6));
-                const text = chunk.choices?.[0]?.delta?.content || "";
+                const text = extractTextAndUsage(chunk);
                 if (text) {
                   sendSSE("token", { text });
                   lineBuffer += text;
-                }
-                if (chunk.usage) {
-                  totalUsage = {
-                    promptTokens: chunk.usage.prompt_tokens || 0,
-                    completionTokens: chunk.usage.completion_tokens || 0,
-                    totalTokens: chunk.usage.total_tokens || 0,
-                  };
                 }
               } catch {}
             }

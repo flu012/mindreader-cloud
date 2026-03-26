@@ -22,9 +22,15 @@
         "type": "string",
         "description": "Neo4j password"
       },
+      "llmProvider": {
+        "type": "string",
+        "description": "LLM provider: openai, anthropic, or dashscope",
+        "enum": ["openai", "anthropic", "dashscope"],
+        "default": "openai"
+      },
       "llmApiKey": {
         "type": "string",
-        "description": "LLM API key (OpenAI, DashScope, or compatible)",
+        "description": "LLM API key (OpenAI, Anthropic, or DashScope)",
         "default": ""
       },
       "llmBaseUrl": {

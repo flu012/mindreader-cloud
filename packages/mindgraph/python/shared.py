@@ -115,11 +115,20 @@ def make_graphiti():
         )
     )
 
-    reranker_config = LLMConfig(
-        api_key=os.getenv("LLM_API_KEY"),
-        base_url=os.getenv("LLM_BASE_URL"),
-        model=os.getenv("LLM_SMALL_MODEL", base_model),
-    )
+    # Reranker uses OpenAI-compatible API — when LLM is Anthropic, fall back to embedder provider
+    is_anthropic = os.getenv("LLM_PROVIDER", "").lower() == "anthropic"
+    if is_anthropic:
+        reranker_config = LLMConfig(
+            api_key=os.getenv("EMBEDDER_API_KEY"),
+            base_url=os.getenv("EMBEDDER_BASE_URL"),
+            model=os.getenv("LLM_SMALL_MODEL", "gpt-4o-mini"),
+        )
+    else:
+        reranker_config = LLMConfig(
+            api_key=os.getenv("LLM_API_KEY"),
+            base_url=os.getenv("LLM_BASE_URL"),
+            model=os.getenv("LLM_SMALL_MODEL", base_model),
+        )
     cross_encoder = OpenAIRerankerClient(config=reranker_config)
 
     return Graphiti(

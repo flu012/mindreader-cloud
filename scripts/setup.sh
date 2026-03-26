@@ -223,7 +223,7 @@ step_llm() {
     echo
     echo "Select your LLM provider:"
     echo "  1) OpenAI    — gpt-4o-mini (default)"
-    echo "  2) Anthropic — claude-sonnet-4-6 (requires OpenAI-compatible proxy)"
+    echo "  2) Anthropic — claude-sonnet-4-6 (native API support)"
     echo "  3) DashScope — qwen3.5-flash (Alibaba Cloud)"
     echo
 
@@ -240,10 +240,6 @@ step_llm() {
             LLM_PROVIDER="anthropic"
             LLM_BASE_URL="https://api.anthropic.com/v1"
             LLM_DEFAULT_MODEL="claude-sonnet-4-6"
-            echo
-            warn "Anthropic requires an OpenAI-compatible proxy (e.g. LiteLLM)."
-            warn "The LLM_BASE_URL must point to your proxy endpoint, not api.anthropic.com directly."
-            LLM_BASE_URL="$(ask "Proxy base URL" "${LLM_BASE_URL:-https://api.anthropic.com/v1}")"
             ;;
         3)
             LLM_PROVIDER="dashscope"
@@ -299,16 +295,25 @@ step_llm() {
             EMBEDDER_API_KEY="${EMBEDDER_API_KEY:-$LLM_API_KEY}"
             ;;
         3|*)
-            EMBEDDER_PROVIDER="$LLM_PROVIDER"
-            EMBEDDER_BASE_URL="$LLM_BASE_URL"
-            EMBEDDER_API_KEY="$LLM_API_KEY"
-            # Map provider to its default embedding model
-            case "$EMBEDDER_PROVIDER" in
-                openai)    EMBEDDER_DEFAULT_MODEL="text-embedding-3-small" ;;
-                dashscope) EMBEDDER_DEFAULT_MODEL="text-embedding-v4" ;;
-                *)         EMBEDDER_DEFAULT_MODEL="text-embedding-3-small" ;;
-            esac
-            info "Using same provider as LLM: ${EMBEDDER_PROVIDER}"
+            if [[ "$LLM_PROVIDER" == "anthropic" ]]; then
+                warn "Anthropic does not provide an embeddings API."
+                info "Defaulting to OpenAI for embeddings. You'll need an OpenAI API key."
+                EMBEDDER_PROVIDER="openai"
+                EMBEDDER_BASE_URL="https://api.openai.com/v1"
+                EMBEDDER_DEFAULT_MODEL="text-embedding-3-small"
+                EMBEDDER_API_KEY="$(ask_secret "API key for OpenAI embedder")"
+            else
+                EMBEDDER_PROVIDER="$LLM_PROVIDER"
+                EMBEDDER_BASE_URL="$LLM_BASE_URL"
+                EMBEDDER_API_KEY="$LLM_API_KEY"
+                # Map provider to its default embedding model
+                case "$EMBEDDER_PROVIDER" in
+                    openai)    EMBEDDER_DEFAULT_MODEL="text-embedding-3-small" ;;
+                    dashscope) EMBEDDER_DEFAULT_MODEL="text-embedding-v4" ;;
+                    *)         EMBEDDER_DEFAULT_MODEL="text-embedding-3-small" ;;
+                esac
+                info "Using same provider as LLM: ${EMBEDDER_PROVIDER}"
+            fi
             ;;
     esac
 
@@ -360,16 +365,34 @@ verify_llm() {
     fi
 
     local test_output
-    test_output="$(LLM_API_KEY="$LLM_API_KEY" LLM_BASE_URL="$LLM_BASE_URL" LLM_MODEL="$LLM_MODEL" python3 -c "
+    if [[ "$LLM_PROVIDER" == "anthropic" ]]; then
+        test_output="$(LLM_API_KEY="$LLM_API_KEY" LLM_MODEL="$LLM_MODEL" python3 -c "
+import os
+try:
+    import anthropic
+except ImportError:
+    from pip._internal.cli.main import main as pip_main
+    pip_main(['install', '-q', 'anthropic'])
+    import anthropic
+c = anthropic.Anthropic(api_key=os.environ['LLM_API_KEY'])
+r = c.messages.create(model=os.environ['LLM_MODEL'], messages=[{'role':'user','content':'Hi'}], max_tokens=5)
+print('OK:', r.content[0].text)
+" 2>&1)" && {
+            success "LLM API verified: $test_output"
+            return 0
+        }
+    else
+        test_output="$(LLM_API_KEY="$LLM_API_KEY" LLM_BASE_URL="$LLM_BASE_URL" LLM_MODEL="$LLM_MODEL" python3 -c "
 import os
 from openai import OpenAI
 c = OpenAI(api_key=os.environ['LLM_API_KEY'], base_url=os.environ['LLM_BASE_URL'])
 r = c.chat.completions.create(model=os.environ['LLM_MODEL'], messages=[{'role':'user','content':'Hi'}], max_tokens=5)
 print('OK:', r.choices[0].message.content)
 " 2>&1)" && {
-        success "LLM API verified: $test_output"
-        return 0
-    }
+            success "LLM API verified: $test_output"
+            return 0
+        }
+    fi
     return 1
 }
 
@@ -497,9 +520,6 @@ step_verify_install() {
                 break
             else
                 LLM_API_KEY="$(ask_secret "Re-enter API key for ${LLM_PROVIDER}")"
-                if [[ "$LLM_PROVIDER" == "anthropic" ]]; then
-                    LLM_BASE_URL="$(ask "Re-enter proxy base URL" "$LLM_BASE_URL")"
-                fi
             fi
         else
             if ask_yn "Retry LLM API test?" "Y"; then
@@ -636,7 +656,7 @@ print_summary() {
     echo
     echo -e "${BOLD}To start MindReader:${RESET}"
     echo -e "  ${CYAN}npm run dev${RESET}           — development mode (hot reload)"
-    echo -e "  ${CYAN}npm run start${RESET}         — production mode"
+    echo -e "  ${CYAN}npm start${RESET}             — production mode"
     echo
     if [[ "$NEO4J_MANAGED" == "true" ]]; then
         echo -e "${BOLD}To manage Neo4j:${RESET}"

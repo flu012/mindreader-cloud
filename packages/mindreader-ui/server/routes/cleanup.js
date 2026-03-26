@@ -437,15 +437,26 @@ If no issues are found, return an empty array: []`;
 
         const pyScript = `
 import os, json
-from openai import OpenAI
-client = OpenAI(api_key=os.getenv("LLM_API_KEY"), base_url=os.getenv("LLM_BASE_URL"))
 with open(os.getenv("MG_PROMPT_FILE")) as f:
     prompt = json.load(f)
-kwargs = dict(model=os.getenv("MG_MODEL", "gpt-4o-mini"), messages=[{"role": "user", "content": prompt}], temperature=0.1, max_tokens=2000, response_format={"type": "json_object"})
-if "dashscope" in (os.getenv("LLM_BASE_URL") or ""):
-    kwargs["extra_body"] = {"enable_thinking": False}
-resp = client.chat.completions.create(**kwargs)
-text = resp.choices[0].message.content.strip()
+if os.getenv("LLM_PROVIDER", "").lower() == "anthropic":
+    import anthropic
+    client = anthropic.Anthropic(api_key=os.getenv("LLM_API_KEY"))
+    resp = client.messages.create(model=os.getenv("MG_MODEL", "claude-sonnet-4-6"), system="You MUST respond with valid JSON only. No markdown code blocks.", messages=[{"role": "user", "content": prompt}], temperature=0.1, max_tokens=2000)
+    text = resp.content[0].text.strip()
+else:
+    from openai import OpenAI
+    client = OpenAI(api_key=os.getenv("LLM_API_KEY"), base_url=os.getenv("LLM_BASE_URL"))
+    kwargs = dict(model=os.getenv("MG_MODEL", "gpt-4o-mini"), messages=[{"role": "user", "content": prompt}], temperature=0.1, max_tokens=2000, response_format={"type": "json_object"})
+    if "dashscope" in (os.getenv("LLM_BASE_URL") or ""):
+        kwargs["extra_body"] = {"enable_thinking": False}
+    resp = client.chat.completions.create(**kwargs)
+    text = resp.choices[0].message.content.strip()
+fence = chr(96)*3
+if text.startswith(fence + "json"): text = text[len(fence)+4:]
+if text.startswith(fence): text = text[len(fence):]
+if text.endswith(fence): text = text[:-len(fence)]
+text = text.strip()
 try:
     data = json.loads(text)
     if isinstance(data, list):
@@ -465,6 +476,7 @@ except Exception:
         const pyEnv = { ...process.env, PYTHONUNBUFFERED: "1" };
         if (config.llmApiKey) pyEnv.LLM_API_KEY = config.llmApiKey;
         if (config.llmBaseUrl) pyEnv.LLM_BASE_URL = config.llmBaseUrl;
+        if (config.llmProvider) pyEnv.LLM_PROVIDER = config.llmProvider;
         pyEnv.MG_PROMPT_FILE = tmpPrompt;
         pyEnv.MG_MODEL = config.llmExtractModel || config.llmModel;
 

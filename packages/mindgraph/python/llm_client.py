@@ -1,12 +1,14 @@
 """
 Multi-provider LLM client for Graphiti.
 
-Uses chat.completions API with JSON schema in system prompt
-instead of OpenAI's responses.parse() API.
+Supports OpenAI-compatible APIs (OpenAI, DashScope) and native Anthropic API.
+Uses chat.completions with JSON schema in system prompt for OpenAI-compatible,
+and Messages API for Anthropic.
 """
 
 import json
 import logging
+import os
 import typing
 
 from openai import AsyncOpenAI
@@ -25,10 +27,10 @@ logger = logging.getLogger(__name__)
 
 class LLMClient(BaseOpenAIClient):
     """
-    A Graphiti LLM client compatible with OpenAI-compatible API endpoints (OpenAI, DashScope, Anthropic via proxy).
+    A Graphiti LLM client supporting OpenAI-compatible APIs and native Anthropic API.
 
-    Uses chat.completions with JSON mode instead of OpenAI's
-    responses.parse() API, which Qwen doesn't fully support.
+    Uses chat.completions with JSON mode for OpenAI/DashScope,
+    and the Messages API for Anthropic.
     """
 
     def __init__(
@@ -45,13 +47,22 @@ class LLMClient(BaseOpenAIClient):
         if config is None:
             config = LLMConfig()
 
-        if client is None:
-            self.client = AsyncOpenAI(api_key=config.api_key, base_url=config.base_url)
-        else:
-            self.client = client
-
-        # DashScope-specific: disable thinking mode in Qwen models
+        self._is_anthropic = os.environ.get("LLM_PROVIDER", "").lower() == "anthropic"
         self._is_dashscope = config.base_url and "dashscope" in config.base_url
+
+        if self._is_anthropic:
+            try:
+                import anthropic
+                self.anthropic_client = anthropic.AsyncAnthropic(api_key=config.api_key)
+            except ImportError:
+                logger.warning("anthropic package not installed, falling back to OpenAI-compatible mode")
+                self._is_anthropic = False
+                self.client = AsyncOpenAI(api_key=config.api_key, base_url=config.base_url) if client is None else client
+        else:
+            if client is None:
+                self.client = AsyncOpenAI(api_key=config.api_key, base_url=config.base_url)
+            else:
+                self.client = client
 
     def _schema_to_prompt(self, response_model: type[BaseModel]) -> str:
         """Convert a Pydantic model to a JSON schema instruction for the prompt."""
@@ -74,9 +85,14 @@ class LLMClient(BaseOpenAIClient):
         verbosity: str | None = None,
     ):
         """Create a structured completion using chat.completions + JSON mode."""
-        # Inject schema into the system prompt
         schema_instruction = self._schema_to_prompt(response_model)
 
+        if self._is_anthropic:
+            return await self._anthropic_structured(
+                model, messages, temperature, max_tokens, response_model, schema_instruction
+            )
+
+        # OpenAI-compatible path
         augmented_messages = []
         system_found = False
         for msg in messages:
@@ -118,6 +134,10 @@ class LLMClient(BaseOpenAIClient):
         response_model: type[BaseModel] | None = None,
     ):
         """Create a regular completion with JSON format."""
+        if self._is_anthropic:
+            return await self._anthropic_completion(model, messages, temperature, max_tokens)
+
+        # OpenAI-compatible path
         kwargs = dict(
             model=model,
             messages=messages,
@@ -129,6 +149,101 @@ class LLMClient(BaseOpenAIClient):
             kwargs["extra_body"] = {"enable_thinking": False}
 
         return await self.client.chat.completions.create(**kwargs)
+
+    # ── Anthropic-specific methods ──
+
+    async def _anthropic_structured(
+        self, model, messages, temperature, max_tokens, response_model, schema_instruction
+    ):
+        """Structured completion via Anthropic Messages API."""
+        system_text, user_messages = self._split_anthropic_messages(messages)
+        system_text = (system_text or "You are a helpful assistant.") + schema_instruction
+        system_text += "\n\nYou MUST respond with valid JSON only. No markdown code blocks."
+
+        response = await self.anthropic_client.messages.create(
+            model=model,
+            system=system_text,
+            messages=user_messages,
+            temperature=temperature or 0.1,
+            max_tokens=max_tokens,
+        )
+        return _AnthropicStructuredResponse(response, response_model)
+
+    async def _anthropic_completion(self, model, messages, temperature, max_tokens):
+        """Regular completion via Anthropic Messages API."""
+        system_text, user_messages = self._split_anthropic_messages(messages)
+        if system_text:
+            system_text += "\n\nYou MUST respond with valid JSON only. No markdown code blocks."
+        else:
+            system_text = "You MUST respond with valid JSON only. No markdown code blocks."
+
+        response = await self.anthropic_client.messages.create(
+            model=model,
+            system=system_text,
+            messages=user_messages,
+            temperature=temperature or 0.1,
+            max_tokens=max_tokens,
+        )
+        return _AnthropicCompletionResponse(response)
+
+    @staticmethod
+    def _split_anthropic_messages(messages):
+        """Split OpenAI-format messages into Anthropic system + messages."""
+        system_parts = []
+        user_messages = []
+        for msg in messages:
+            if msg.get("role") == "system":
+                system_parts.append(msg["content"])
+            else:
+                user_messages.append({"role": msg["role"], "content": msg["content"]})
+        # Anthropic requires at least one user message
+        if not user_messages:
+            user_messages.append({"role": "user", "content": "Please respond."})
+        return "\n\n".join(system_parts) if system_parts else None, user_messages
+
+
+class _AnthropicUsage:
+    """Mimic OpenAI usage object from Anthropic response."""
+    def __init__(self, response):
+        u = response.usage
+        self.prompt_tokens = u.input_tokens
+        self.completion_tokens = u.output_tokens
+        self.total_tokens = u.input_tokens + u.output_tokens
+
+
+class _AnthropicStructuredResponse:
+    """Wrapper that makes an Anthropic response look like a structured OpenAI response."""
+    def __init__(self, response, response_model: type[BaseModel]):
+        raw_text = response.content[0].text if response.content else "{}"
+        # Strip markdown code blocks if present
+        text = raw_text.strip()
+        if text.startswith("```json"):
+            text = text[7:]
+        if text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+
+        try:
+            data = json.loads(text)
+            data = _StructuredResponse._fix_field_names(data, response_model)
+            text = json.dumps(data)
+        except (json.JSONDecodeError, Exception):
+            pass
+
+        self.output_text = text
+        self.usage = _AnthropicUsage(response)
+
+
+class _AnthropicCompletionResponse:
+    """Wrapper that makes an Anthropic response look like an OpenAI chat.completions response."""
+    def __init__(self, response):
+        text = response.content[0].text if response.content else ""
+        self.choices = [type("Choice", (), {
+            "message": type("Message", (), {"content": text})()
+        })()]
+        self.usage = _AnthropicUsage(response)
 
 
 class _StructuredResponse:

@@ -192,7 +192,7 @@ npm start
 - Node.js 18+
 - Python 3.11+
 - Neo4j 5.x（包含Docker配置，或使用自有实例）
-- LLM API密钥（OpenAI、通过代理的Anthropic或DashScope）
+- LLM API密钥（OpenAI、Anthropic或DashScope）
 - 自我进化功能需要：支持网络搜索的模型（如通过DashScope使用Qwen qwen3.5-plus）
 
 ## 架构
@@ -260,7 +260,7 @@ MindReader的**预处理管道**解决了这个问题：
 |---|---|---|---|
 | OpenAI | 已支持 | `gpt-4o-mini` | 否 |
 | DashScope（阿里巴巴） | 已支持 | `qwen3.5-flash` | 是（内置） |
-| Anthropic | 已支持（通过代理） | 需要OpenAI兼容代理 | 取决于代理 |
+| Anthropic | 已支持（原生） | `claude-sonnet-4-6` | 否 |
 
 > 自我进化功能使用支持内置网络搜索的模型（如DashScope的Qwen系列）效果显著更好。
 

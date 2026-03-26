@@ -23,6 +23,7 @@ const execFileAsync = promisify(execFile);
  */
 function _buildPyEnv(config) {
   const pyEnv = { ...process.env, PYTHONUNBUFFERED: "1" };
+  if (config.llmProvider) pyEnv.LLM_PROVIDER = config.llmProvider;
   if (config.llmApiKey) pyEnv.LLM_API_KEY = config.llmApiKey;
   if (config.llmBaseUrl) pyEnv.LLM_BASE_URL = config.llmBaseUrl;
   if (config.llmModel) pyEnv.LLM_MODEL = config.llmModel;

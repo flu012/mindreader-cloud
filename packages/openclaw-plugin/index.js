@@ -27,6 +27,7 @@ function bridgeConfig(openClawConfig) {
     neo4jUri: raw.neo4jUri,
     neo4jUser: raw.neo4jUser,
     neo4jPassword: raw.neo4jPassword,
+    llmProvider: raw.llmProvider,
     llmApiKey: raw.llmApiKey,
     llmBaseUrl: raw.llmBaseUrl,
     llmModel: raw.llmModel,

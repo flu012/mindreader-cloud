@@ -31,7 +31,7 @@ export function loadConfig(overrides = {}) {
   const llmPreset = providers.llm[llmProvider] || {};
   const embedderPreset = providers.embedder[embedderProvider] || {};
 
-  // Allow LLM_BASE_URL env var to override provider preset (needed for Anthropic proxy)
+  // Allow LLM_BASE_URL env var to override provider preset
   const llmBaseUrl = overrides.llmBaseUrl || process.env.LLM_BASE_URL || llmPreset.baseUrl || "https://api.openai.com/v1";
 
   const defaultPythonPath = path.resolve(__dirname, "../../mindgraph/python");

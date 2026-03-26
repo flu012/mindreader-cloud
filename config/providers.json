@@ -8,8 +8,7 @@
     "anthropic": {
       "baseUrl": "https://api.anthropic.com/v1",
       "defaultModel": "claude-sonnet-4-6",
-      "models": ["claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
-      "note": "Requires OpenAI-compatible proxy (e.g. LiteLLM). Set LLM_BASE_URL to your proxy endpoint."
+      "models": ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"]
     },
     "dashscope": {
       "baseUrl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",

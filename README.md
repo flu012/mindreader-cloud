@@ -192,7 +192,7 @@ Open `http://localhost:18900` to access the web UI.
 - Node.js 18+
 - Python 3.11+
 - Neo4j 5.x (Docker setup included, or bring your own)
-- An LLM API key (OpenAI, Anthropic via proxy, or DashScope)
+- An LLM API key (OpenAI, Anthropic, or DashScope)
 - For self-evolution: a web-search-capable model (e.g. Qwen qwen3.5-plus via DashScope)
 
 ## Architecture
@@ -260,7 +260,7 @@ You can switch between preprocessing modes via the `PREPROCESS_MODE` environment
 |---|---|---|---|
 | OpenAI | Supported | `gpt-4o-mini` | No |
 | DashScope (Alibaba) | Supported | `qwen3.5-flash` | Yes (built-in) |
-| Anthropic | Supported (via proxy) | Requires OpenAI-compatible proxy | Depends on proxy |
+| Anthropic | Supported (native) | `claude-sonnet-4-6` | No |
 
 > For the self-evolve feature, a model with built-in web search (like DashScope's Qwen models) produces significantly richer results.
 
