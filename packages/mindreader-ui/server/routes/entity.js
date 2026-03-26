@@ -5,9 +5,10 @@ import path from "node:path";
 import neo4j from "neo4j-driver";
 import { query, nodeToPlain, relToPlain } from "../neo4j.js";
 import { categorizeEntity } from "../lib/categorizer.js";
+import { preprocessStore, executePreprocessResult, EXTRACTION_INSTRUCTIONS } from "../lib/preprocessor.js";
 
 export function registerRoutes(app, ctx) {
-  const { driver, config, logger } = ctx;
+  const { driver, config, logger, mgDaemon } = ctx;
 
   /**
    * GET /api/entity/:name — Entity detail with all relationships
@@ -336,7 +337,7 @@ else:
         ? `Research focus: ${sanitizedFocus}`
         : "Research this entity broadly. Discover important facts, related people, organizations, events, locations, and other entities.";
 
-      const llmPrompt = `You are a thorough knowledge graph researcher. Your task is to deeply research an entity and discover as many new related entities and relationships as possible. Be comprehensive — explore multiple dimensions: people, organizations, events, locations, technologies, concepts, and projects connected to this entity.
+      const llmPrompt = `You are a thorough knowledge graph researcher. Your task is to research "${startNode.name || name}" and discover new entities that are CONNECTED to it. Every entity you discover must have at least one relationship linking it to the target entity or to another discovered entity.
 
 ## Target Entity
 ${entityInfo}
@@ -352,15 +353,19 @@ ${taskSection}
 
 Search the web for current information about this entity. Then output your discoveries in this exact format:
 
-For each new entity you discover, output on its own line:
+For each new entity, output [ENTITY] followed immediately by its [REL] on the next line(s):
 [ENTITY] {"name": "Entity Name", "category": "person|organization|project|location|event|concept|tool|other", "summary": "One sentence description", "tags": ["tag1", "tag2"]}
-
-For each relationship between entities, output on its own line:
 [REL] {"source": "Source Entity", "target": "Target Entity", "label": "short_label", "fact": "Describes the relationship in a full sentence"}
 
-The "source" is the entity performing the action, "target" is the entity being acted upon.
+CRITICAL RULES:
+- Every [ENTITY] MUST appear as source or target in at least one [REL]. Do NOT output an entity without a relationship.
+- Every [REL] must connect to "${startNode.name || name}" (the target entity), a Known Connection, or another discovered entity. No floating subgraphs.
+- Entity names must be proper nouns or specific names with independent identity (people, organizations, projects, products, technologies, places, events).
+- Do NOT create entities for roles, skills, descriptions, statuses, or attributes. These belong in the relationship "fact" field.
+- Do not rediscover entities already in the Known Connections section.
+- The "source" is the entity performing the action, "target" is the entity being acted upon.
 
-You may include reasoning text between these lines. Aim for 10-25 entities and their relationships — be thorough and comprehensive. Go beyond the obvious: find related people, organizations, events, locations, projects, tools, and concepts. For each entity, also consider its own important connections. Do not rediscover entities that are already in the Known Connections section. Entity names should be proper nouns or specific names, not generic descriptions.`;
+You may include reasoning text between [ENTITY]/[REL] lines. Aim for 10-25 connected entities — be thorough but ensure every entity has a clear relationship path back to "${startNode.name || name}".`;
 
       // Call LLM with streaming via REST fetch
       const evolveModel = config.llmEvolveModel || config.llmModel;
@@ -613,6 +618,16 @@ You may include reasoning text between these lines. Aim for 10-25 entities and t
    * POST /api/entity/:name/evolve/save — Save evolved entities and relationships
    * Request body: { entities: [...], relationships: [...] }
    */
+  /**
+   * POST /api/entity/:name/evolve/save — Save evolved discoveries via the store pipeline.
+   *
+   * Instead of raw Cypher entity/relationship creation, we:
+   * 1. Drop orphan entities (no relationships → never should have been discovered)
+   * 2. Feed each relationship fact through preprocessStore → Graphiti
+   *    - Preprocessor classifies: attributes update existing entities, relationships go to Graphiti
+   *    - Graphiti creates new entities with proper embeddings + EXTRACTION_INSTRUCTIONS
+   * 3. This means any improvements to the store/capture pipeline automatically apply to evolve
+   */
   app.post("/api/entity/:name/evolve/save", async (req, res) => {
     try {
       const { name: targetName } = req.params;
@@ -621,27 +636,13 @@ You may include reasoning text between these lines. Aim for 10-25 entities and t
       if (!Array.isArray(entities) || !Array.isArray(relationships)) {
         return res.status(400).json({ error: "entities and relationships must be arrays" });
       }
-      if (!entities.length && !relationships.length) {
-        return res.status(400).json({ error: "No entities or relationships to save" });
-      }
-      if (entities.length > 100) {
-        return res.status(400).json({ error: "Too many entities (max 100)" });
+      if (!relationships.length) {
+        return res.status(400).json({ error: "No relationships to save" });
       }
       if (relationships.length > 200) {
         return res.status(400).json({ error: "Too many relationships (max 200)" });
       }
-      // Validate entity shapes
-      for (const ent of entities) {
-        if (typeof ent.name !== "string" || !ent.name.trim() || ent.name.length > 200) {
-          return res.status(400).json({ error: `Invalid entity name: ${String(ent.name).slice(0, 50)}` });
-        }
-        if (ent.summary && (typeof ent.summary !== "string" || ent.summary.length > 2000)) {
-          return res.status(400).json({ error: `Entity summary too long for: ${ent.name.slice(0, 50)}` });
-        }
-        if (ent.tags && !Array.isArray(ent.tags)) {
-          return res.status(400).json({ error: `Entity tags must be an array for: ${ent.name.slice(0, 50)}` });
-        }
-      }
+
       // Validate relationship shapes
       for (const rel of relationships) {
         if (typeof rel.source !== "string" || !rel.source.trim() || rel.source.length > 200) {
@@ -655,73 +656,67 @@ You may include reasoning text between these lines. Aim for 10-25 entities and t
         }
       }
 
-      // Prepare entities with normalized tags
-      const preparedEntities = entities.map(ent => {
-        const tags = [
-          ...(Array.isArray(ent.tags) ? ent.tags : []),
-          "source:evolve",
-          `evolved-from:${targetName.toLowerCase()}`,
-        ];
-        return {
-          name: ent.name.trim(),
-          summary: (ent.summary || "").slice(0, 2000),
-          category: (ent.category || "").slice(0, 100),
-          tags: [...new Set(tags.map(t => String(t).toLowerCase().trim()).filter(Boolean))].sort(),
-        };
-      });
-
-      // Batch create entities (skip existing, single round trip)
-      const entityResult = await query(driver,
-        `UNWIND $entities AS ent
-         OPTIONAL MATCH (existing:Entity) WHERE toLower(existing.name) = toLower(ent.name)
-         WITH ent, existing
-         WHERE existing IS NULL
-         CREATE (e:Entity {
-           name: ent.name,
-           summary: ent.summary,
-           group_id: ent.category,
-           tags: ent.tags,
-           created_at: datetime(),
-           uuid: randomUUID()
-         })
-         RETURN e.name AS created`,
-        { entities: preparedEntities }
+      // Drop orphan entities — only keep entities that appear in at least one relationship
+      const entityNamesInRels = new Set();
+      for (const rel of relationships) {
+        entityNamesInRels.add(rel.source.trim().toLowerCase());
+        entityNamesInRels.add(rel.target.trim().toLowerCase());
+      }
+      const connectedEntities = entities.filter(e =>
+        entityNamesInRels.has(e.name.trim().toLowerCase())
       );
-      const entitiesCreated = entityResult.length;
-      const createdNames = new Set(entityResult.map(r => r.created?.toLowerCase()));
-      const skippedNames = preparedEntities
-        .filter(e => !createdNames.has(e.name.toLowerCase()))
-        .map(e => e.name);
-      const entitiesSkipped = skippedNames.length;
+      const droppedOrphans = entities.length - connectedEntities.length;
+      if (droppedOrphans > 0) {
+        logger?.info?.(`[evolve/save] Dropped ${droppedOrphans} orphan entities with no relationships`);
+      }
 
-      // Batch create relationships (only where both endpoints exist, single round trip)
-      const preparedRels = relationships.map(rel => ({
-        source: rel.source.trim(),
-        target: rel.target.trim(),
-        label: (rel.label || "related_to").slice(0, 200),
-        fact: rel.fact.trim().slice(0, 2000),
-      }));
+      // Feed each relationship fact through the store pipeline.
+      // The preprocessor will classify attributes vs relationships,
+      // and Graphiti will create entities with embeddings + EXTRACTION_INSTRUCTIONS.
+      let storedCount = 0;
+      let attrCount = 0;
+      const errors = [];
 
-      const relResult = await query(driver,
-        `UNWIND $rels AS rel
-         MATCH (s:Entity) WHERE toLower(s.name) = toLower(rel.source)
-         MATCH (t:Entity) WHERE toLower(t.name) = toLower(rel.target)
-         CREATE (s)-[:RELATES_TO {
-           name: rel.label,
-           fact: rel.fact,
-           created_at: datetime(),
-           uuid: randomUUID()
-         }]->(t)
-         RETURN s.name AS src`,
-        { rels: preparedRels }
+      for (const rel of relationships) {
+        const fact = rel.fact.trim().slice(0, 2000);
+        try {
+          const result = await preprocessStore(fact, "evolve", targetName, driver, config, logger);
+          attrCount += result.entityUpdates.length;
+          storedCount += result.forGraphiti.length;
+          await executePreprocessResult(result, driver, mgDaemon, config, logger);
+        } catch (err) {
+          // Degrade: send raw fact to Graphiti with EXTRACTION_INSTRUCTIONS
+          logger?.warn?.(`[evolve/save] preprocessor failed for fact, degrading: ${err.message}`);
+          try {
+            await mgDaemon("add", {
+              content: fact,
+              source: "evolve",
+              project: targetName,
+              custom_instructions: EXTRACTION_INSTRUCTIONS,
+            }, 120000);
+            storedCount++;
+          } catch (e2) {
+            errors.push(e2.message);
+          }
+        }
+      }
+
+      // Count what Graphiti actually created by checking entity names from relationships
+      // that didn't previously exist in the graph
+      const newEntityNames = [...entityNamesInRels].filter(n =>
+        n !== targetName.toLowerCase()
       );
-      const relationshipsCreated = relResult.length;
 
       res.json({
-        entitiesCreated,
-        entitiesSkipped,
-        relationshipsCreated,
-        skippedNames,
+        relationshipsProcessed: relationships.length,
+        attributeUpdates: attrCount,
+        relationshipsStored: storedCount,
+        orphansDropped: droppedOrphans,
+        // Keep backwards-compatible fields for UI
+        entitiesCreated: storedCount,
+        entitiesSkipped: droppedOrphans,
+        relationshipsCreated: storedCount,
+        errors: errors.length > 0 ? errors : undefined,
       });
     } catch (err) {
       logger?.error?.(`Node evolve save error: ${err.message}`);
