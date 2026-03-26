@@ -7,8 +7,8 @@ $ErrorActionPreference = "Stop"
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
-$RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-if (-not $RepoRoot) { $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path) }
+$RepoRoot = Split-Path -Parent $PSScriptRoot
+if (-not $RepoRoot) { $RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path }
 $EnvFile = Join-Path $RepoRoot ".env"
 $DockerComposeFile = Join-Path $RepoRoot "packages\mindgraph\docker\docker-compose.yml"
 $PythonDir = Join-Path $RepoRoot "packages\mindgraph\python"
