@@ -12,7 +12,13 @@ export function getDriver(config) {
       neo4j.auth.basic(
         config.neo4jUser || "neo4j",
         config.neo4jPassword || ""
-      )
+      ),
+      {
+        // Detect and discard defunct connections before they cause errors
+        maxConnectionLifetime: 30 * 60 * 1000, // 30 min — recycle idle connections
+        connectionAcquisitionTimeout: 30 * 1000, // 30s — fail fast if pool exhausted
+        maxConnectionPoolSize: 50,
+      }
     );
   }
   return _driver;
