@@ -285,7 +285,7 @@ step_neo4j() {
 
     NEO4J_URI="${NEO4J_URI:-bolt://localhost:7687}"
     NEO4J_USER="${NEO4J_USER:-neo4j}"
-    NEO4J_PASSWORD="${NEO4J_PASSWORD:-neo4j}"
+    NEO4J_PASSWORD="${NEO4J_PASSWORD:-mindreader-2026}"
     NEO4J_MANAGED=false
 
     if ask_yn "Do you have an existing Neo4j instance to connect to?" "N"; then
@@ -307,11 +307,38 @@ step_neo4j() {
             exit 1
         fi
         success "Docker is available."
+
+        # Let user set a password (passed to docker-compose via NEO4J_PASSWORD env)
+        NEO4J_PASSWORD="$(ask "Neo4j password" "$NEO4J_PASSWORD")"
+
         info "Starting Neo4j container..."
-        if docker compose -f "$DOCKER_COMPOSE_FILE" up -d; then
+        if NEO4J_PASSWORD="$NEO4J_PASSWORD" docker compose -f "$DOCKER_COMPOSE_FILE" up -d; then
             success "Neo4j container started."
-            info "Waiting 10 seconds for Neo4j to become ready..."
-            sleep 10
+            info "Waiting for Neo4j to become ready (first start may take 20-30s)..."
+            # Poll until Neo4j HTTP API responds (max 60s)
+            local http_uri="${NEO4J_URI/bolt:\/\//http://}"
+            http_uri="${http_uri/:7687/:7474}"
+            local ready=false
+            for i in $(seq 1 12); do
+                sleep 5
+                local status
+                status="$(curl -s -o /dev/null -w "%{http_code}" \
+                    -u "${NEO4J_USER}:${NEO4J_PASSWORD}" \
+                    -H "Content-Type: application/json" \
+                    -d '{"statements":[{"statement":"RETURN 1"}]}' \
+                    "${http_uri}/db/neo4j/tx/commit" 2>/dev/null)" || true
+                if [[ "$status" == "200" ]]; then
+                    ready=true
+                    break
+                fi
+                printf "."
+            done
+            echo
+            if [[ "$ready" == "true" ]]; then
+                success "Neo4j is ready."
+            else
+                warn "Neo4j may still be starting. Verification will retry in Step 4."
+            fi
         else
             error "Failed to start Neo4j container. Check $DOCKER_COMPOSE_FILE."
             exit 1

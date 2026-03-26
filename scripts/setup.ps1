@@ -212,12 +212,34 @@ function Step-Neo4j {
         }
         Write-Success "Docker is available."
 
+        # Let user set a password for Neo4j (passed via NEO4J_PASSWORD env to docker-compose)
+        $script:Neo4jPassword = Ask "Neo4j password" (Get-Default "NEO4J_PASSWORD" "mindreader-2026")
+
         Write-Info "Starting Neo4j container..."
+        $env:NEO4J_PASSWORD = $script:Neo4jPassword
         docker compose -f $DockerComposeFile up -d
         if ($LASTEXITCODE -eq 0) {
             Write-Success "Neo4j container started."
-            Write-Info "Waiting 10 seconds for Neo4j to become ready..."
-            Start-Sleep -Seconds 10
+            Write-Info "Waiting for Neo4j to become ready (first start may take 20-30s)..."
+            # Poll until Neo4j HTTP API responds (max 60s)
+            $httpUri = $script:Neo4jUri -replace '^bolt://', 'http://' -replace ':7687', ':7474'
+            $ready = $false
+            for ($i = 0; $i -lt 12; $i++) {
+                Start-Sleep -Seconds 5
+                try {
+                    $cred = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("$($script:Neo4jUser):$($script:Neo4jPassword)"))
+                    $headers = @{ "Authorization" = "Basic $cred"; "Content-Type" = "application/json" }
+                    $response = Invoke-WebRequest -Uri "$httpUri/db/neo4j/tx/commit" -Method POST -Headers $headers -Body '{"statements":[{"statement":"RETURN 1"}]}' -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+                    if ($response.StatusCode -eq 200) { $ready = $true; break }
+                } catch { }
+                Write-Host "." -NoNewline
+            }
+            Write-Host ""
+            if ($ready) {
+                Write-Success "Neo4j is ready."
+            } else {
+                Write-Warn "Neo4j may still be starting. Verification will retry in Step 4."
+            }
         } else {
             Write-Err "Failed to start Neo4j container."
             exit 1
