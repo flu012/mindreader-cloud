@@ -15,11 +15,15 @@ Step-by-step installation for a fresh machine. Takes about 10 minutes.
 
 ## Step 1: Clone and Run Setup
 
+Works on **Linux/macOS (bash)**, **WSL**, and **Windows (PowerShell)**:
+
 ```bash
 git clone https://github.com/flu012/mindreaderv2.git
 cd mindreaderv2
 npm run setup
 ```
+
+> `npm run setup` auto-detects your platform — runs the bash wizard on Linux/macOS/WSL, or the PowerShell wizard on Windows.
 
 The interactive wizard walks you through 4 steps:
 
