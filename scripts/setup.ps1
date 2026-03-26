@@ -49,6 +49,20 @@ function Ask-Secret($prompt) {
 
 function Write-Separator { Write-Host ("-" * 50) -ForegroundColor Cyan }
 
+function Find-RealPython {
+    # Returns the path to a real Python executable, skipping Windows Store stubs.
+    foreach ($name in @("python3", "python")) {
+        $cmd = Get-Command $name -ErrorAction SilentlyContinue
+        if (-not $cmd) { continue }
+        if ($cmd.Source -match 'WindowsApps') { continue }
+        try {
+            $out = & $cmd.Source --version 2>&1 | Out-String
+            if ($out -match 'Python \d+\.\d+') { return $cmd.Source }
+        } catch { continue }
+    }
+    return $null
+}
+
 # ---------------------------------------------------------------------------
 # Banner
 # ---------------------------------------------------------------------------
@@ -354,9 +368,8 @@ d.verifyConnectivity().then(() => { console.log('OK'); process.exit(0); }).catch
 function Verify-LLM {
     Write-Info "Testing LLM API ($($script:LlmProvider) / $($script:LlmModel))..."
 
-    $python = Get-Command python -ErrorAction SilentlyContinue
-    if (-not $python) { $python = Get-Command python3 -ErrorAction SilentlyContinue }
-    if (-not $python) {
+    $pyPath = Find-RealPython
+    if (-not $pyPath) {
         Write-Warn "Python not found - skipping LLM verification."
         return $true
     }
@@ -393,7 +406,7 @@ print('OK:', r.choices[0].message.content)
 "@
     }
 
-    $result = $testCode | & $python.Source 2>&1
+    $result = $testCode | & $pyPath 2>&1
     if ($LASTEXITCODE -eq 0) {
         Write-Success "LLM API verified: $result"
         return $true
@@ -404,13 +417,11 @@ print('OK:', r.choices[0].message.content)
 function Install-PythonVenv {
     Write-Info "Setting up Python virtual environment..."
 
-    $python = Get-Command python -ErrorAction SilentlyContinue
-    if (-not $python) { $python = Get-Command python3 -ErrorAction SilentlyContinue }
-    if (-not $python) {
+    $py = Find-RealPython
+    if (-not $py) {
         Write-Warn "Python not found - skipping venv setup."
         return
     }
-    $py = $python.Source
 
     if (-not (Test-Path $VenvDir)) {
         & $py -m venv $VenvDir
@@ -665,30 +676,50 @@ function Check-Prerequisites {
         $allOk = $false
     }
 
-    # Python
-    $py = Get-Command python -ErrorAction SilentlyContinue
-    if (-not $py) { $py = Get-Command python3 -ErrorAction SilentlyContinue }
-    if ($py) {
-        $pyVerStr = & $py.Source --version 2>&1
-        if ($pyVerStr -match '(\d+)\.(\d+)') {
-            $pyMajor = [int]$Matches[1]
-            $pyMinor = [int]$Matches[2]
-            if ($pyMajor -ge 3 -and $pyMinor -ge 11) {
-                Write-Success "Python $pyMajor.$pyMinor ($($py.Source))"
-            } else {
-                Write-Err "Python $pyMajor.$pyMinor - version 3.11+ required"
-                Write-Host "  Install: https://www.python.org/downloads/"
-                Write-Host "  Or via winget: winget install Python.Python.3.12"
-                Write-Host "  IMPORTANT: Check 'Add python.exe to PATH' during install"
-                $allOk = $false
+    # Python — Windows has "python" app execution aliases that redirect to
+    # the Microsoft Store instead of running Python. We must detect and skip those.
+    $pyFound = $false
+    foreach ($pyName in @("python3", "python")) {
+        $pyCmd = Get-Command $pyName -ErrorAction SilentlyContinue
+        if (-not $pyCmd) { continue }
+
+        # Skip Windows Store stub aliases (WindowsApps path)
+        if ($pyCmd.Source -match 'WindowsApps') { continue }
+
+        # Try running it — wrap in try/catch because Store stubs throw errors
+        try {
+            $pyVerStr = & $pyCmd.Source --version 2>&1 | Out-String
+            if ($pyVerStr -match '(\d+)\.(\d+)') {
+                $pyMajor = [int]$Matches[1]
+                $pyMinor = [int]$Matches[2]
+                if ($pyMajor -ge 3 -and $pyMinor -ge 11) {
+                    Write-Success "Python $pyMajor.$pyMinor ($($pyCmd.Source))"
+                    $pyFound = $true
+                    break
+                } else {
+                    Write-Err "Python $pyMajor.$pyMinor - version 3.11+ required"
+                    Write-Host "  Install: https://www.python.org/downloads/"
+                    Write-Host "  Or via winget: winget install Python.Python.3.12"
+                    Write-Host "  IMPORTANT: Check 'Add python.exe to PATH' during install"
+                    $allOk = $false
+                    $pyFound = $true
+                    break
+                }
             }
+        } catch {
+            # Store stub or broken install — skip and try next
+            continue
         }
-    } else {
+    }
+    if (-not $pyFound) {
         Write-Err "Python - not found"
         Write-Host "  Install: https://www.python.org/downloads/"
         Write-Host "  Or via winget: winget install Python.Python.3.12"
         Write-Host "  Or via choco:  choco install python312"
         Write-Host "  IMPORTANT: Check 'Add python.exe to PATH' during install"
+        Write-Host ""
+        Write-Host "  TIP: If you just installed Python, close and reopen PowerShell." -ForegroundColor Yellow
+        Write-Host "  TIP: Disable Windows Store aliases: Settings > Apps > Advanced app settings > App execution aliases" -ForegroundColor Yellow
         $allOk = $false
     }
 
