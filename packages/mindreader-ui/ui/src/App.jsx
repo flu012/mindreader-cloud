@@ -172,7 +172,7 @@ export default function App() {
       return ids.has(s) && ids.has(t);
     });
     return { nodes, links };
-  }, [graphData, hiddenTypes]);
+  }, [graphData, hiddenTypes, egoGraph]);
 
   const navigateToEntity = useCallback(
     (name) => {
