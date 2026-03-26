@@ -337,35 +337,44 @@ else:
         ? `Research focus: ${sanitizedFocus}`
         : "Research this entity broadly. Discover important facts, related people, organizations, events, locations, and other entities.";
 
-      const llmPrompt = `You are a thorough knowledge graph researcher. Your task is to research "${startNode.name || name}" and discover new entities that are CONNECTED to it. Every entity you discover must have at least one relationship linking it to the target entity or to another discovered entity.
+      const llmPrompt = `You are an internet research specialist. Your task is to **search the web** for real-world information about "${startNode.name || name}" and bring back NEW facts, context, and connections that are NOT already in the knowledge graph.
 
 ## Target Entity
 ${entityInfo}
 
-## Known Connections
+## Already Known (DO NOT repeat these)
 ${connectionsInfo}
 
-## Connected Entities
+## Already Connected Entities (DO NOT rediscover these)
 ${connectedEntities}
 
-## Task
+## Research Task
 ${taskSection}
 
-Search the web for current information about this entity. Then output your discoveries in this exact format:
+**You MUST perform web searches** to find current, factual information. Focus on:
+1. Real-world facts — official websites, Wikipedia, news articles, public records
+2. Recent developments — latest news, updates, changes, announcements
+3. External context — industry, competitors, affiliations, achievements, history
+4. Concrete details — dates, locations, numbers, titles, affiliations
 
-For each new entity, output [ENTITY] followed immediately by its [REL] on the next line(s):
-[ENTITY] {"name": "Entity Name", "category": "person|organization|project|location|event|concept|tool|other", "summary": "One sentence description", "tags": ["tag1", "tag2"]}
-[REL] {"source": "Source Entity", "target": "Target Entity", "label": "short_label", "fact": "Describes the relationship in a full sentence"}
+Do NOT just reorganise or restate what is already known above. The value is in NEW information from external sources.
+
+## Output Format
+
+For each discovery, output [ENTITY] followed immediately by its [REL] on the next line(s):
+[ENTITY] {"name": "Entity Name", "category": "person|organization|project|location|event|concept|tool|other", "summary": "One sentence description based on what you found online", "tags": ["tag1", "tag2"]}
+[REL] {"source": "Source Entity", "target": "Target Entity", "label": "short_label", "fact": "A specific factual statement from your research"}
 
 CRITICAL RULES:
-- Every [ENTITY] MUST appear as source or target in at least one [REL]. Do NOT output an entity without a relationship.
-- Every [REL] must connect to "${startNode.name || name}" (the target entity), a Known Connection, or another discovered entity. No floating subgraphs.
-- Entity names must be proper nouns or specific names with independent identity (people, organizations, projects, products, technologies, places, events).
-- Do NOT create entities for roles, skills, descriptions, statuses, or attributes. These belong in the relationship "fact" field.
-- Do not rediscover entities already in the Known Connections section.
-- The "source" is the entity performing the action, "target" is the entity being acted upon.
+- Every [ENTITY] MUST appear as source or target in at least one [REL]. No orphan entities.
+- Every [REL] must connect back to "${startNode.name || name}", a Known Connection, or another discovered entity.
+- Entity names must be proper nouns or specific names (people, organizations, projects, products, places, events).
+- Do NOT create entities for roles, skills, descriptions, statuses, or attributes — put those in the "fact" field.
+- Do NOT rediscover entities already listed in "Already Connected Entities" above.
+- Relationship "fact" fields should contain specific, sourced information (e.g. "Founded in 2015 in San Francisco" not "Is a company").
+- "source" is the entity performing the action, "target" is the entity being acted upon.
 
-You may include reasoning text between [ENTITY]/[REL] lines. Aim for 10-25 connected entities — be thorough but ensure every entity has a clear relationship path back to "${startNode.name || name}".`;
+You may include reasoning text between [ENTITY]/[REL] lines. Aim for 10-25 new entities with real external information.`;
 
       // Call LLM with streaming via REST fetch
       const evolveModel = config.llmEvolveModel || config.llmModel;
