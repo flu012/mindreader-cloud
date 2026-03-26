@@ -71,11 +71,76 @@ function TagEditor({ tags, entityName, onTagsChanged }) {
   );
 }
 
+// Collapsible section wrapper
+function Section({ title, count, defaultOpen = false, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div style={{ marginBottom: 2 }}>
+      <button
+        onClick={() => setOpen(!open)}
+        style={{
+          width: "100%", display: "flex", alignItems: "center", gap: 6,
+          padding: "8px 0", background: "none", border: "none", cursor: "pointer",
+          borderBottom: "1px solid rgba(255,255,255,0.06)",
+        }}
+      >
+        <span style={{ fontSize: 10, color: "var(--text-secondary)", transition: "transform 0.2s", transform: open ? "rotate(90deg)" : "rotate(0deg)" }}>&#9654;</span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text-primary)", flex: 1, textAlign: "left" }}>{title}</span>
+        {count !== undefined && (
+          <span style={{ fontSize: 10, color: "var(--text-secondary)", background: "rgba(255,255,255,0.06)", padding: "1px 6px", borderRadius: 8 }}>{count}</span>
+        )}
+      </button>
+      {open && <div style={{ padding: "8px 0 4px" }}>{children}</div>}
+    </div>
+  );
+}
+
+// Toolbar icon button
+function ToolBtn({ icon, label, onClick, active, disabled, color, activeColor, activeBg }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      style={{
+        display: "flex", flexDirection: "column", alignItems: "center", gap: 2,
+        padding: "6px 4px", borderRadius: 8, cursor: disabled ? "not-allowed" : "pointer",
+        background: active ? (activeBg || "rgba(74,158,255,0.15)") : "transparent",
+        border: "none", transition: "all 0.15s",
+        opacity: disabled ? 0.4 : 1, minWidth: 40,
+      }}
+    >
+      <span style={{ fontSize: 16 }}>{icon}</span>
+      <span style={{ fontSize: 9, fontWeight: 600, color: active ? (activeColor || "#4a9eff") : (color || "var(--text-secondary)"), letterSpacing: 0.3 }}>{label}</span>
+    </button>
+  );
+}
+
+// Summary with truncation
+function CollapsibleSummary({ entityName, savedSummary }) {
+  const MAX_LINES = 3;
+  const [expanded, setExpanded] = useState(false);
+  const lines = (savedSummary || "").split("\n");
+  const needsTruncate = lines.length > MAX_LINES || (savedSummary || "").length > 200;
+  const displayText = !expanded && needsTruncate
+    ? lines.slice(0, MAX_LINES).join("\n").slice(0, 200) + "..."
+    : savedSummary;
+
+  return (
+    <EditableSummary
+      entityName={entityName}
+      savedSummary={savedSummary}
+      displayText={displayText}
+      truncated={!expanded && needsTruncate}
+      onToggle={() => setExpanded(!expanded)}
+    />
+  );
+}
+
 export default function DetailPanel({ entity, relationships, onClose, onNavigate, groupColors, categoryColors, onRefresh, onEntityUpdate, onDeleteNode, onViewGraph }) {
-  const [activeAction, setActiveAction] = useState(null); // null | "merge" | "link"
+  const [activeAction, setActiveAction] = useState(null);
   const [showEvolve, setShowEvolve] = useState(false);
 
-  // Reset evolve modal when entity changes
   useEffect(() => {
     setShowEvolve(false);
     setActiveAction(null);
@@ -85,167 +150,91 @@ export default function DetailPanel({ entity, relationships, onClose, onNavigate
 
   const outgoing = relationships.filter((r) => r.direction === "outgoing");
   const incoming = relationships.filter((r) => r.direction === "incoming");
+  const totalRels = outgoing.length + incoming.length;
 
   return (
     <div className="detail-panel">
       <button className="close-btn" onClick={onClose}>✕</button>
 
-      <h2>{entity.name}</h2>
-
-      {/* Category + Node Type on same line */}
-      <div style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 4 }}>
+      {/* === Title === */}
+      <h2 style={{ marginBottom: 6 }}>{entity.name}</h2>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
         <CategorySelector entityName={entity.name} currentCategory={entity.category || entity.group_id} onRefresh={onEntityUpdate || onRefresh} />
         <NodeTypeSelector entityName={entity.name} currentNodeType={entity.node_type || "normal"} onRefresh={onEntityUpdate || onRefresh} />
+        {entity.created_at && (
+          <span style={{ fontSize: 10, color: "var(--text-secondary)" }}>{formatDate(entity.created_at)}</span>
+        )}
       </div>
 
-      {/* Action toolbar */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6, marginBottom: 8 }}>
-        <button
-          onClick={() => setShowEvolve(true)}
-          disabled={showEvolve}
-          style={{
-            padding: "6px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600,
-            cursor: showEvolve ? "not-allowed" : "pointer", transition: "all 0.2s",
-            background: "linear-gradient(135deg, rgba(74, 255, 255, 0.12), rgba(74, 255, 158, 0.12))",
-            border: "1px solid rgba(74, 255, 255, 0.25)",
-            color: "var(--accent-cyan)",
-            opacity: showEvolve ? 0.5 : 1,
-          }}
-        >✨ Evolve</button>
-        <button
-          onClick={() => onViewGraph && onViewGraph(entity.name)}
-          style={{
-            padding: "6px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600,
-            cursor: "pointer", transition: "all 0.2s",
-            background: "transparent",
-            border: "1px solid rgba(255,255,255,0.1)",
-            color: "var(--text-secondary)",
-          }}
-        >🕸️ Graph</button>
-        <button
-          onClick={() => setActiveAction(activeAction === "link" ? null : "link")}
-          style={{
-            padding: "6px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600,
-            cursor: "pointer", transition: "all 0.2s",
-            background: activeAction === "link" ? "rgba(74,255,120,0.15)" : "transparent",
-            border: `1px solid ${activeAction === "link" ? "rgba(74,255,120,0.4)" : "rgba(255,255,255,0.1)"}`,
-            color: activeAction === "link" ? "#66dd88" : "var(--text-secondary)",
-          }}
-        >🔗 Link</button>
-        <button
-          onClick={() => setActiveAction(activeAction === "merge" ? null : "merge")}
-          style={{
-            padding: "6px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600,
-            cursor: "pointer", transition: "all 0.2s",
-            background: activeAction === "merge" ? "rgba(255,165,0,0.15)" : "transparent",
-            border: `1px solid ${activeAction === "merge" ? "rgba(255,165,0,0.4)" : "rgba(255,255,255,0.1)"}`,
-            color: activeAction === "merge" ? "#ffaa44" : "var(--text-secondary)",
-          }}
-        >🔀 Merge</button>
-        <button
-          onClick={() => setActiveAction(activeAction === "delete" ? null : "delete")}
-          style={{
-            padding: "6px 10px", borderRadius: 8, fontSize: 11, fontWeight: 600,
-            cursor: "pointer", transition: "all 0.2s",
-            background: activeAction === "delete" ? "rgba(255,74,74,0.15)" : "transparent",
-            border: `1px solid ${activeAction === "delete" ? "rgba(255,74,74,0.4)" : "rgba(255,255,255,0.1)"}`,
-            color: activeAction === "delete" ? "#ff4a4a" : "var(--text-secondary)",
-          }}
-        >🗑️ Delete</button>
+      {/* === Compact Toolbar === */}
+      <div style={{
+        display: "flex", justifyContent: "space-around", padding: "4px 0 8px",
+        borderBottom: "1px solid rgba(255,255,255,0.06)", marginBottom: 8,
+      }}>
+        <ToolBtn icon="✨" label="Evolve" onClick={() => setShowEvolve(true)} disabled={showEvolve} color="var(--accent-cyan)" />
+        <ToolBtn icon="🕸️" label="Graph" onClick={() => onViewGraph && onViewGraph(entity.name)} />
+        <ToolBtn icon="🔗" label="Link" onClick={() => setActiveAction(activeAction === "link" ? null : "link")} active={activeAction === "link"} activeColor="#66dd88" activeBg="rgba(74,255,120,0.12)" />
+        <ToolBtn icon="🔀" label="Merge" onClick={() => setActiveAction(activeAction === "merge" ? null : "merge")} active={activeAction === "merge"} activeColor="#ffaa44" activeBg="rgba(255,165,0,0.12)" />
+        <ToolBtn icon="🗑️" label="Delete" onClick={() => setActiveAction(activeAction === "delete" ? null : "delete")} active={activeAction === "delete"} activeColor="#ff4a4a" activeBg="rgba(255,74,74,0.12)" />
       </div>
 
+      {/* Action panels (inline, shown when active) */}
       {activeAction === "delete" && (
-        <DeletePanel
-          entityName={entity.name}
-          onDone={() => { setActiveAction(null); if (onDeleteNode) onDeleteNode(entity.name); onClose(); }}
-          onCancel={() => setActiveAction(null)}
-        />
+        <DeletePanel entityName={entity.name} onDone={() => { setActiveAction(null); if (onDeleteNode) onDeleteNode(entity.name); onClose(); }} onCancel={() => setActiveAction(null)} />
       )}
-
       {activeAction && activeAction !== "delete" && (
-        <ActionPanel
-          mode={activeAction}
-          entityName={entity.name}
-          onDone={(result) => {
-            setActiveAction(null);
-            if (onRefresh) onRefresh();
-            if (result?.kept && onNavigate) onNavigate(result.kept);
-          }}
-          onCancel={() => setActiveAction(null)}
-        />
+        <ActionPanel mode={activeAction} entityName={entity.name} onDone={(result) => { setActiveAction(null); if (onRefresh) onRefresh(); if (result?.kept && onNavigate) onNavigate(result.kept); }} onCancel={() => setActiveAction(null)} />
       )}
 
+      {/* === Tags === */}
       <TagEditor tags={entity.tags || []} entityName={entity.name} onTagsChanged={onEntityUpdate || onRefresh} />
 
-      {/* Editable summary */}
-      <EditableSummary entityName={entity.name} savedSummary={entity.summary || ""} />
+      {/* === Summary (collapsible) === */}
+      <Section title="Summary" defaultOpen={true}>
+        <CollapsibleSummary entityName={entity.name} savedSummary={entity.summary || ""} />
+      </Section>
 
-      {entity.created_at && (
-        <div style={{ fontSize: 11, color: "var(--text-secondary)", marginBottom: 12 }}>
-          Created: {formatDate(entity.created_at)}
-        </div>
-      )}
+      {/* === AI Explanation (collapsed) === */}
+      <Section title="AI Explanation" defaultOpen={false}>
+        <ExplanationSection entityName={entity.name} savedExplanation={entity.explanation} explanationUpdatedAt={entity.explanation_updated_at} />
+      </Section>
 
-      {/* AI Explanation section */}
-      <ExplanationSection
-        entityName={entity.name}
-        savedExplanation={entity.explanation}
-        explanationUpdatedAt={entity.explanation_updated_at}
-      />
+      {/* === Relationships (collapsed) === */}
+      <Section title="Relationships" count={totalRels} defaultOpen={false}>
+        {outgoing.length > 0 && (
+          <>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)", marginBottom: 4 }}>→ Outgoing ({outgoing.length})</div>
+            {outgoing.map((rel, i) => (
+              <RelationshipItem key={`out-${i}`} rel={rel} direction="outgoing" isCredential={entity.node_type === "credential"} onNavigate={onNavigate} />
+            ))}
+          </>
+        )}
+        {incoming.length > 0 && (
+          <>
+            <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-secondary)", margin: "8px 0 4px" }}>← Incoming ({incoming.length})</div>
+            {incoming.map((rel, i) => (
+              <RelationshipItem key={`in-${i}`} rel={rel} direction="incoming" isCredential={rel.other?.node_type === "credential"} onNavigate={onNavigate} />
+            ))}
+          </>
+        )}
+        {totalRels === 0 && (
+          <div style={{ color: "var(--text-secondary)", fontSize: 12 }}>No relationships found.</div>
+        )}
+      </Section>
 
-      {outgoing.length > 0 && (
-        <>
-          <h3>→ Outgoing ({outgoing.length})</h3>
-          {outgoing.map((rel, i) => (
-            <RelationshipItem
-              key={`out-${i}`}
-              rel={rel}
-              direction="outgoing"
-              isCredential={entity.node_type === "credential"}
-              onNavigate={onNavigate}
-            />
-          ))}
-        </>
-      )}
-
-      {incoming.length > 0 && (
-        <>
-          <h3>← Incoming ({incoming.length})</h3>
-          {incoming.map((rel, i) => (
-            <RelationshipItem
-              key={`in-${i}`}
-              rel={rel}
-              direction="incoming"
-              isCredential={rel.other?.node_type === "credential"}
-              onNavigate={onNavigate}
-            />
-          ))}
-        </>
-      )}
-
-      {outgoing.length === 0 && incoming.length === 0 && (
-        <div style={{ color: "var(--text-secondary)", fontSize: 13, marginTop: 16 }}>
-          No relationships found.
-        </div>
-      )}
-
-      <EntityActivityHistory entityName={entity.name} />
+      {/* === Activity (collapsed) === */}
+      <Section title="Activity" defaultOpen={false}>
+        <EntityActivityHistory entityName={entity.name} />
+      </Section>
 
       {showEvolve && (
-        <EvolveModal
-          entityName={entity.name}
-          onClose={() => setShowEvolve(false)}
-          onSaved={() => {
-            setShowEvolve(false);
-            if (onRefresh) onRefresh();
-          }}
-        />
+        <EvolveModal entityName={entity.name} onClose={() => setShowEvolve(false)} onSaved={() => { setShowEvolve(false); if (onRefresh) onRefresh(); }} />
       )}
     </div>
   );
 }
 
-function EditableSummary({ entityName, savedSummary }) {
+function EditableSummary({ entityName, savedSummary, displayText, truncated, onToggle }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(savedSummary);
   const [saving, setSaving] = useState(false);
@@ -346,29 +335,39 @@ function EditableSummary({ entityName, savedSummary }) {
     );
   }
 
+  const shownText = displayText !== undefined ? displayText : value;
+
   return (
-    <div
-      onClick={() => setEditing(true)}
-      title="Click to edit summary"
-      style={{
-        marginBottom: 12,
-        padding: value ? "8px 10px" : "6px 10px",
-        background: value ? "transparent" : "var(--bg-secondary)",
-        borderRadius: 6,
-        cursor: "pointer",
-        fontSize: 13,
-        color: value ? "var(--text-primary)" : "var(--text-secondary)",
-        lineHeight: 1.5,
-        borderLeft: value ? "2px solid rgba(74, 158, 255, 0.3)" : "2px solid transparent",
-        transition: "all 0.2s",
-        minHeight: value ? "auto" : 28,
-        display: "flex",
-        alignItems: "center",
-      }}
-      onMouseEnter={(e) => { e.currentTarget.style.borderLeftColor = "var(--accent-blue)"; }}
-      onMouseLeave={(e) => { e.currentTarget.style.borderLeftColor = value ? "rgba(74, 158, 255, 0.3)" : "transparent"; }}
-    >
-      {value || "Click to add summary..."}
+    <div style={{ marginBottom: 4 }}>
+      <div
+        onClick={() => setEditing(true)}
+        title="Click to edit summary"
+        style={{
+          padding: value ? "6px 8px" : "6px 8px",
+          background: value ? "transparent" : "var(--bg-secondary)",
+          borderRadius: 6,
+          cursor: "pointer",
+          fontSize: 13,
+          color: value ? "var(--text-primary)" : "var(--text-secondary)",
+          lineHeight: 1.5,
+          borderLeft: value ? "2px solid rgba(74, 158, 255, 0.3)" : "2px solid transparent",
+          transition: "all 0.2s",
+          whiteSpace: "pre-wrap",
+        }}
+        onMouseEnter={(e) => { e.currentTarget.style.borderLeftColor = "var(--accent-blue)"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.borderLeftColor = value ? "rgba(74, 158, 255, 0.3)" : "transparent"; }}
+      >
+        {shownText || "Click to add summary..."}
+      </div>
+      {(truncated !== undefined) && value && (
+        <button
+          onClick={(e) => { e.stopPropagation(); if (onToggle) onToggle(); }}
+          style={{
+            background: "none", border: "none", color: "var(--accent-blue)",
+            fontSize: 11, cursor: "pointer", padding: "2px 8px", marginTop: 2,
+          }}
+        >{truncated ? "Show more" : "Show less"}</button>
+      )}
     </div>
   );
 }
