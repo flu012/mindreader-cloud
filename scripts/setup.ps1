@@ -299,13 +299,13 @@ function Step-LLM {
             $defaultModel = "qwen3.5-flash"
             Write-Host ""
             Write-Host "Select DashScope region:"
-            Write-Host "  1) China domestic  - coding.dashscope.aliyuncs.com/v1"
+            Write-Host "  1) China domestic  - dashscope.aliyuncs.com/compatible-mode/v1"
             Write-Host "  2) International   - dashscope-intl.aliyuncs.com/compatible-mode/v1"
             Write-Host ""
             $dsRegion = Ask "Region" "1"
             switch ($dsRegion) {
                 "2" { $script:LlmBaseUrl = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1" }
-                default { $script:LlmBaseUrl = "https://coding.dashscope.aliyuncs.com/v1" }
+                default { $script:LlmBaseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1" }
             }
         }
         default {
@@ -351,13 +351,13 @@ function Step-LLM {
             $embDefaultModel = "text-embedding-v4"
             Write-Host ""
             Write-Host "Select DashScope region:"
-            Write-Host "  1) China domestic  - coding.dashscope.aliyuncs.com/v1"
+            Write-Host "  1) China domestic  - dashscope.aliyuncs.com/compatible-mode/v1"
             Write-Host "  2) International   - dashscope-intl.aliyuncs.com/compatible-mode/v1"
             Write-Host ""
             $dsEmbRegion = Ask "Region" "1"
             switch ($dsEmbRegion) {
                 "2" { $script:EmbedderBaseUrl = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1" }
-                default { $script:EmbedderBaseUrl = "https://coding.dashscope.aliyuncs.com/v1" }
+                default { $script:EmbedderBaseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1" }
             }
             $script:EmbedderApiKey = Ask-Secret "API key for DashScope embedder (Enter to reuse LLM key)" $script:LlmApiKey
         }
@@ -487,7 +487,25 @@ print('OK:', r.choices[0].message.content)
         return $true
     }
     $errOutput = ($result | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] }) -join "`n"
-    if ($errOutput) { Write-Warn "LLM test stderr: $errOutput" }
+
+    # Show debug details so the user can diagnose the failure
+    $maskedKey = if ($script:LlmApiKey.Length -gt 8) {
+        $script:LlmApiKey.Substring(0, 4) + "..." + $script:LlmApiKey.Substring($script:LlmApiKey.Length - 4)
+    } else { "****" }
+    Write-Host ""
+    Write-Warn "LLM API test failed. Configuration used:"
+    Write-Host "    Provider : $($script:LlmProvider)"
+    Write-Host "    Base URL : $($script:LlmBaseUrl)"
+    Write-Host "    Model    : $($script:LlmModel)"
+    Write-Host "    API Key  : $maskedKey"
+    if ($errOutput) {
+        Write-Host ""
+        Write-Warn "Error details:"
+        # Extract the most useful line from the traceback
+        $lastLine = ($errOutput -split "`n" | Where-Object { $_.Trim() -ne "" }) | Select-Object -Last 1
+        Write-Host "    $lastLine" -ForegroundColor Red
+    }
+    Write-Host ""
     return $false
 }
 
@@ -601,13 +619,15 @@ function Step-VerifyInstall {
         $llmAttempts++
         if (Verify-LLM) { break }
 
-        Write-Err "LLM API test failed for provider '$($script:LlmProvider)'."
         if ($llmAttempts -ge 2) {
             if (Ask-YN "Skip LLM verification and continue anyway?" "N") {
                 Write-Warn "Skipping LLM verification."
                 break
             } else {
-                $script:LlmApiKey = Ask-Secret "Re-enter API key for $($script:LlmProvider)" $script:LlmApiKey
+                Write-Host "  Re-enter LLM settings (press Enter to keep current value):"
+                $script:LlmBaseUrl = Ask "  Base URL" $script:LlmBaseUrl
+                $script:LlmModel = Ask "  Model" $script:LlmModel
+                $script:LlmApiKey = Ask-Secret "  API key" $script:LlmApiKey
             }
         } else {
             if (Ask-YN "Retry LLM API test?" "Y") { continue }

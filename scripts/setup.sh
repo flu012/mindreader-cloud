@@ -386,14 +386,14 @@ step_llm() {
             LLM_DEFAULT_MODEL="qwen3.5-flash"
             echo
             echo "Select DashScope region:"
-            echo "  1) China domestic  — coding.dashscope.aliyuncs.com/v1"
+            echo "  1) China domestic  — dashscope.aliyuncs.com/compatible-mode/v1"
             echo "  2) International   — dashscope-intl.aliyuncs.com/compatible-mode/v1"
             echo
             local ds_region
             ds_region="$(ask "Region" "1")"
             case "$ds_region" in
                 2) LLM_BASE_URL="https://dashscope-intl.aliyuncs.com/compatible-mode/v1" ;;
-                *) LLM_BASE_URL="https://coding.dashscope.aliyuncs.com/v1" ;;
+                *) LLM_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1" ;;
             esac
             ;;
         *)
@@ -441,14 +441,14 @@ step_llm() {
             EMBEDDER_DEFAULT_MODEL="text-embedding-v4"
             echo
             echo "Select DashScope region:"
-            echo "  1) China domestic  — coding.dashscope.aliyuncs.com/v1"
+            echo "  1) China domestic  — dashscope.aliyuncs.com/compatible-mode/v1"
             echo "  2) International   — dashscope-intl.aliyuncs.com/compatible-mode/v1"
             echo
             local ds_emb_region
             ds_emb_region="$(ask "Region" "1")"
             case "$ds_emb_region" in
                 2) EMBEDDER_BASE_URL="https://dashscope-intl.aliyuncs.com/compatible-mode/v1" ;;
-                *) EMBEDDER_BASE_URL="https://coding.dashscope.aliyuncs.com/v1" ;;
+                *) EMBEDDER_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1" ;;
             esac
             EMBEDDER_API_KEY="$(ask_secret "API key for DashScope embedder (Enter to reuse LLM key)" "$LLM_API_KEY")"
             ;;
@@ -537,7 +537,7 @@ verify_llm() {
         return 0
     fi
 
-    local test_output
+    local test_output test_exit
     if [[ "$LLM_PROVIDER" == "anthropic" ]]; then
         test_output="$(LLM_API_KEY="$LLM_API_KEY" LLM_MODEL="$LLM_MODEL" python3 -c "
 import os
@@ -550,10 +550,8 @@ except ImportError:
 c = anthropic.Anthropic(api_key=os.environ['LLM_API_KEY'])
 r = c.messages.create(model=os.environ['LLM_MODEL'], messages=[{'role':'user','content':'Hi'}], max_tokens=5)
 print('OK:', r.content[0].text)
-" 2>&1)" && {
-            success "LLM API verified: $test_output"
-            return 0
-        }
+" 2>&1)"
+        test_exit=$?
     else
         test_output="$(LLM_API_KEY="$LLM_API_KEY" LLM_BASE_URL="$LLM_BASE_URL" LLM_MODEL="$LLM_MODEL" python3 -c "
 import os
@@ -561,11 +559,35 @@ from openai import OpenAI
 c = OpenAI(api_key=os.environ['LLM_API_KEY'], base_url=os.environ['LLM_BASE_URL'])
 r = c.chat.completions.create(model=os.environ['LLM_MODEL'], messages=[{'role':'user','content':'Hi'}], max_tokens=5)
 print('OK:', r.choices[0].message.content)
-" 2>&1)" && {
-            success "LLM API verified: $test_output"
-            return 0
-        }
+" 2>&1)"
+        test_exit=$?
     fi
+
+    if [[ $test_exit -eq 0 ]]; then
+        success "LLM API verified: $test_output"
+        return 0
+    fi
+
+    # Show debug details
+    local masked_key="****"
+    if [[ ${#LLM_API_KEY} -gt 8 ]]; then
+        masked_key="${LLM_API_KEY:0:4}...${LLM_API_KEY: -4}"
+    fi
+    echo
+    warn "LLM API test failed. Configuration used:"
+    echo "    Provider : ${LLM_PROVIDER}"
+    echo "    Base URL : ${LLM_BASE_URL}"
+    echo "    Model    : ${LLM_MODEL}"
+    echo "    API Key  : ${masked_key}"
+    # Extract last non-empty line (usually the actual error message)
+    local last_line
+    last_line="$(echo "$test_output" | grep -v '^$' | tail -1)"
+    if [[ -n "$last_line" ]]; then
+        echo
+        warn "Error details:"
+        echo -e "    \033[31m${last_line}\033[0m"
+    fi
+    echo
     return 1
 }
 
@@ -686,13 +708,15 @@ step_verify_install() {
         if verify_llm; then
             break
         fi
-        error "LLM API test failed for provider '${LLM_PROVIDER}'."
         if [[ $llm_attempts -ge 2 ]]; then
             if ask_yn "Skip LLM verification and continue anyway?" "N"; then
-                warn "Skipping LLM verification. Check your API key and base URL."
+                warn "Skipping LLM verification."
                 break
             else
-                LLM_API_KEY="$(ask_secret "Re-enter API key for ${LLM_PROVIDER}" "$LLM_API_KEY")"
+                echo "  Re-enter LLM settings (press Enter to keep current value):"
+                LLM_BASE_URL="$(ask "  Base URL" "$LLM_BASE_URL")"
+                LLM_MODEL="$(ask "  Model" "$LLM_MODEL")"
+                LLM_API_KEY="$(ask_secret "  API key" "$LLM_API_KEY")"
             fi
         else
             if ask_yn "Retry LLM API test?" "Y"; then
