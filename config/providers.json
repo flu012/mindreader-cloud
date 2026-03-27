@@ -12,6 +12,7 @@
     },
     "dashscope": {
       "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
+      "baseUrlIntl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
       "defaultModel": "qwen3.5-flash",
       "models": ["qwen3.5-flash", "qwen3.5-plus"]
     }
@@ -23,6 +24,7 @@
     },
     "dashscope": {
       "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
+      "baseUrlIntl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
       "defaultModel": "text-embedding-v4"
     }
   }

@@ -383,8 +383,18 @@ step_llm() {
             ;;
         3)
             LLM_PROVIDER="dashscope"
-            LLM_BASE_URL="https://coding.dashscope.aliyuncs.com/v1"
             LLM_DEFAULT_MODEL="qwen3.5-flash"
+            echo
+            echo "Select DashScope region:"
+            echo "  1) China domestic  — coding.dashscope.aliyuncs.com/v1"
+            echo "  2) International   — dashscope-intl.aliyuncs.com/compatible-mode/v1"
+            echo
+            local ds_region
+            ds_region="$(ask "Region" "1")"
+            case "$ds_region" in
+                2) LLM_BASE_URL="https://dashscope-intl.aliyuncs.com/compatible-mode/v1" ;;
+                *) LLM_BASE_URL="https://coding.dashscope.aliyuncs.com/v1" ;;
+            esac
             ;;
         *)
             warn "Invalid choice. Defaulting to OpenAI."
@@ -428,8 +438,18 @@ step_llm() {
             ;;
         2)
             EMBEDDER_PROVIDER="dashscope"
-            EMBEDDER_BASE_URL="https://coding.dashscope.aliyuncs.com/v1"
             EMBEDDER_DEFAULT_MODEL="text-embedding-v4"
+            echo
+            echo "Select DashScope region:"
+            echo "  1) China domestic  — coding.dashscope.aliyuncs.com/v1"
+            echo "  2) International   — dashscope-intl.aliyuncs.com/compatible-mode/v1"
+            echo
+            local ds_emb_region
+            ds_emb_region="$(ask "Region" "1")"
+            case "$ds_emb_region" in
+                2) EMBEDDER_BASE_URL="https://dashscope-intl.aliyuncs.com/compatible-mode/v1" ;;
+                *) EMBEDDER_BASE_URL="https://coding.dashscope.aliyuncs.com/v1" ;;
+            esac
             EMBEDDER_API_KEY="$(ask_secret "API key for DashScope embedder (Enter to reuse LLM key)" "$LLM_API_KEY")"
             ;;
         3|*)

@@ -296,8 +296,17 @@ function Step-LLM {
         }
         "3" {
             $script:LlmProvider = "dashscope"
-            $script:LlmBaseUrl = "https://coding.dashscope.aliyuncs.com/v1"
             $defaultModel = "qwen3.5-flash"
+            Write-Host ""
+            Write-Host "Select DashScope region:"
+            Write-Host "  1) China domestic  — coding.dashscope.aliyuncs.com/v1"
+            Write-Host "  2) International   — dashscope-intl.aliyuncs.com/compatible-mode/v1"
+            Write-Host ""
+            $dsRegion = Ask "Region" "1"
+            switch ($dsRegion) {
+                "2" { $script:LlmBaseUrl = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1" }
+                default { $script:LlmBaseUrl = "https://coding.dashscope.aliyuncs.com/v1" }
+            }
         }
         default {
             Write-Warn "Invalid choice. Defaulting to OpenAI."
@@ -339,8 +348,17 @@ function Step-LLM {
         }
         "2" {
             $script:EmbedderProvider = "dashscope"
-            $script:EmbedderBaseUrl = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
             $embDefaultModel = "text-embedding-v4"
+            Write-Host ""
+            Write-Host "Select DashScope region:"
+            Write-Host "  1) China domestic  — coding.dashscope.aliyuncs.com/v1"
+            Write-Host "  2) International   — dashscope-intl.aliyuncs.com/compatible-mode/v1"
+            Write-Host ""
+            $dsEmbRegion = Ask "Region" "1"
+            switch ($dsEmbRegion) {
+                "2" { $script:EmbedderBaseUrl = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1" }
+                default { $script:EmbedderBaseUrl = "https://coding.dashscope.aliyuncs.com/v1" }
+            }
             $script:EmbedderApiKey = Ask-Secret "API key for DashScope embedder (Enter to reuse LLM key)" $script:LlmApiKey
         }
         default {
