@@ -128,7 +128,8 @@ Rules:
 - Tags must be lowercase, hyphenated, 1-3 words each
 - entity_name MUST exactly match a name from KNOWN ENTITIES
 - If the text mentions an entity not in KNOWN ENTITIES, classify as "relationship" (Graphiti will create the new entity)
-- Prefer "attribute" over "relationship" when information describes a single entity
+- If the text mentions TWO OR MORE entities (known or unknown), ALWAYS classify as "relationship" — even if one entity is known
+- Only use "attribute" for facts that describe a SINGLE known entity with no other entity involved (e.g. "Alice is a swimmer" → attribute of Alice)
 - If the text is noise or has no meaningful facts, return {"facts": []}`;
 }
 
@@ -169,7 +170,8 @@ Rules:
 - Tags must be lowercase, hyphenated, 1-3 words each
 - entity_name MUST exactly match a name from KNOWN ENTITIES
 - If the text mentions an entity not in KNOWN ENTITIES, classify as "relationship"
-- Prefer "attribute" when information describes a single entity
+- If the text mentions TWO OR MORE entities (known or unknown), ALWAYS classify as "relationship"
+- Only use "attribute" for facts about a SINGLE known entity with no other entity involved
 - If nothing is worth remembering, return {"facts": []}`;
 }
 
@@ -219,7 +221,7 @@ function parseClassifyResponse(response, source, project, knownEntityNames) {
  * Apply a single entity update to Neo4j (add tags + append summary).
  */
 export async function applyEntityUpdate(update, driver) {
-  if (!update.name) return;
+  if (!update.name) return false;
   const session = driver.session();
   try {
     // Fetch existing tags for deduplication
@@ -228,7 +230,7 @@ export async function applyEntityUpdate(update, driver) {
        RETURN e.tags AS tags, e.summary AS summary`,
       { name: update.name }
     );
-    if (existing.records.length === 0) return;
+    if (existing.records.length === 0) return false; // entity not found
 
     const oldTags = existing.records[0].get("tags") || [];
     const oldSummary = existing.records[0].get("summary") || "";
@@ -248,6 +250,7 @@ export async function applyEntityUpdate(update, driver) {
        SET e.tags = $tags, e.summary = $summary`,
       { name: update.name, tags: mergedTags, summary: newSummary }
     );
+    return true;
   } finally {
     await session.close();
   }
@@ -257,11 +260,20 @@ export async function applyEntityUpdate(update, driver) {
  * Execute a PreprocessResult: apply entity updates, then feed items to Graphiti.
  */
 export async function executePreprocessResult(result, driver, mgDaemon, config, logger) {
-  // 1. Apply entity updates directly to Neo4j
+  // 1. Apply entity updates directly to Neo4j; if entity not found, forward to Graphiti
   for (const update of result.entityUpdates) {
     try {
-      await applyEntityUpdate(update, driver);
-      logger?.info?.(`Preprocessor: updated ${update.name} tags=[${update.addTags}]`);
+      const applied = await applyEntityUpdate(update, driver);
+      if (applied) {
+        logger?.info?.(`Preprocessor: updated ${update.name} tags=[${update.addTags}]`);
+      } else {
+        // Entity not found in Neo4j — forward to Graphiti so it can create it
+        logger?.info?.(`Preprocessor: entity "${update.name}" not found, forwarding to Graphiti`);
+        const text = update.summaryAppend
+          ? `${update.name}: ${update.summaryAppend}`
+          : update.name;
+        result.forGraphiti.push({ content: text, source: "preprocessor-fallback" });
+      }
     } catch (err) {
       logger?.warn?.(`Preprocessor: entity update failed for ${update.name}: ${err.message}`);
     }
