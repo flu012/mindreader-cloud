@@ -30,6 +30,21 @@ export function createServer(config, logger) {
   app.use(cors());
   app.use(express.json({ limit: "512kb" }));
 
+  // Log request/response payload sizes for /api/ routes
+  app.use("/api", (req, res, next) => {
+    const reqSize = req.headers["content-length"] || (req.body ? Buffer.byteLength(JSON.stringify(req.body)) : 0);
+    const start = Date.now();
+    const origJson = res.json.bind(res);
+    res.json = (body) => {
+      const resPayload = JSON.stringify(body);
+      const resSize = Buffer.byteLength(resPayload);
+      const ms = Date.now() - start;
+      logger?.info?.(`${req.method} ${req.path} ${res.statusCode} ${ms}ms req=${reqSize}b res=${resSize}b`);
+      return origJson(body);
+    };
+    next();
+  });
+
   // Serve static UI files
   const uiDist = path.resolve(__dirname, "../ui/dist");
   app.use(express.static(uiDist));
