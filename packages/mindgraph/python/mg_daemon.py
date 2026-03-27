@@ -319,22 +319,44 @@ async def handle_request(line):
 # ---------------------------------------------------------------------------
 # Main loop — reads stdin line-by-line, writes responses to stdout
 # ---------------------------------------------------------------------------
+async def _read_stdin_line(loop):
+    """Read a line from stdin, using a thread on Windows where connect_read_pipe is unsupported."""
+    return await loop.run_in_executor(None, sys.stdin.readline)
+
+
 async def main():
     # Signal readiness
     sys.stdout.write("READY\n")
     sys.stdout.flush()
 
     loop = asyncio.get_event_loop()
-    reader = asyncio.StreamReader()
-    protocol = asyncio.StreamReaderProtocol(reader)
-    await loop.connect_read_pipe(lambda: protocol, sys.stdin)
+
+    # On Unix, use asyncio StreamReader for efficient async stdin.
+    # On Windows, connect_read_pipe is not supported — fall back to threaded readline.
+    use_pipe_reader = sys.platform != "win32"
+    reader = None
+
+    if use_pipe_reader:
+        try:
+            reader = asyncio.StreamReader()
+            protocol = asyncio.StreamReaderProtocol(reader)
+            await loop.connect_read_pipe(lambda: protocol, sys.stdin)
+        except NotImplementedError:
+            reader = None
+            use_pipe_reader = False
 
     while True:
         try:
-            line_bytes = await reader.readline()
-            if not line_bytes:
-                break  # EOF — parent closed stdin
-            line = line_bytes.decode("utf-8", errors="replace")
+            if use_pipe_reader:
+                line_bytes = await reader.readline()
+                if not line_bytes:
+                    break  # EOF — parent closed stdin
+                line = line_bytes.decode("utf-8", errors="replace")
+            else:
+                line = await _read_stdin_line(loop)
+                if not line:
+                    break  # EOF
+
             result = await handle_request(line)
             if result:
                 sys.stdout.write(result)
