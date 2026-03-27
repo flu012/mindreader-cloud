@@ -524,11 +524,11 @@ function Install-PythonVenv {
         & $py -m venv $VenvDir
     }
 
-    $pip = Join-Path $VenvDir "Scripts\pip.exe"
-    if (-not (Test-Path $pip)) { $pip = Join-Path $VenvDir "Scripts\pip" }
+    $venvPy = Join-Path $VenvDir "Scripts\python.exe"
+    if (-not (Test-Path $venvPy)) { $venvPy = Join-Path $VenvDir "Scripts\python" }
 
-    & $pip install --quiet --upgrade pip
-    & $pip install --quiet -r (Join-Path $PythonDir "requirements.txt")
+    & $venvPy -m pip install --quiet --upgrade pip 2>$null
+    & $venvPy -m pip install --quiet -r (Join-Path $PythonDir "requirements.txt")
     Write-Success "Python venv ready at $VenvDir"
 }
 
@@ -541,8 +541,23 @@ function Install-NPM {
 
 function Build-UI {
     Write-Info "Building React UI..."
+
+    # The ui/ subdirectory is not an npm workspace — install its deps separately
+    $uiDir = Join-Path $RepoRoot "packages\mindreader-ui\ui"
+    if (Test-Path (Join-Path $uiDir "package.json")) {
+        Write-Info "Installing UI dependencies..."
+        Push-Location $uiDir
+        try { npm install --silent } finally { Pop-Location }
+    }
+
     Push-Location $RepoRoot
-    try { npm run build } finally { Pop-Location }
+    try {
+        npm run build 2>&1 | ForEach-Object { Write-Host $_ }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warn "UI build failed (exit code $LASTEXITCODE). The server will still work but the graph UI won't be available."
+            return
+        }
+    } finally { Pop-Location }
     Write-Success "UI build complete."
 }
 
@@ -656,21 +671,23 @@ function Step-VerifyInstall {
 # ---------------------------------------------------------------------------
 function Init-Neo4jIndexes {
     Write-Info "Initialising Neo4j indexes..."
-    $initScript = Join-Path $PythonDir "init_db.py"
+    $initScript = Join-Path $RepoRoot "packages\mindreader-ui\server\init-indexes.js"
     if (Test-Path $initScript) {
-        $pyPath = Find-RealPython
-        if ($pyPath) {
-            $venvPy = Join-Path $VenvDir "Scripts\python.exe"
-            $usePy = if (Test-Path $venvPy) { $venvPy } else { $pyPath }
-            try {
-                & $usePy $initScript 2>$null
+        try {
+            $env:NEO4J_URI = $script:Neo4jUri
+            $env:NEO4J_USER = $script:Neo4jUser
+            $env:NEO4J_PASSWORD = $script:Neo4jPassword
+            node $initScript 2>$null
+            if ($LASTEXITCODE -eq 0) {
                 Write-Success "Neo4j indexes initialised."
-            } catch {
-                Write-Warn "Index init script failed - you may need to run it manually."
+            } else {
+                Write-Warn "Index init script exited with code $LASTEXITCODE - you may need to run it manually."
             }
+        } catch {
+            Write-Warn "Index init script failed: $_"
         }
     } else {
-        Write-Warn "No init_db.py found - skipping index initialisation."
+        Write-Warn "No init-indexes.js found - skipping index initialisation."
     }
 }
 

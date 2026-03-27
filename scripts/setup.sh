@@ -596,8 +596,8 @@ install_python_venv() {
     if [[ ! -d "$VENV_DIR" ]]; then
         python3 -m venv "$VENV_DIR"
     fi
-    "$VENV_DIR/bin/pip" install --quiet --upgrade pip
-    "$VENV_DIR/bin/pip" install --quiet -r "$PYTHON_DIR/requirements.txt"
+    "$VENV_DIR/bin/python" -m pip install --quiet --upgrade pip 2>/dev/null
+    "$VENV_DIR/bin/python" -m pip install --quiet -r "$PYTHON_DIR/requirements.txt"
     success "Python venv ready at $VENV_DIR"
 }
 
@@ -609,16 +609,29 @@ install_npm() {
 
 build_ui() {
     info "Building React UI..."
-    (cd "$REPO_ROOT" && npm run build --silent 2>&1 | tail -5)
-    success "UI build complete."
+
+    # The ui/ subdirectory is not an npm workspace — install its deps separately
+    local ui_dir="$REPO_ROOT/packages/mindreader-ui/ui"
+    if [[ -f "$ui_dir/package.json" ]]; then
+        info "Installing UI dependencies..."
+        (cd "$ui_dir" && npm install --silent)
+    fi
+
+    if (cd "$REPO_ROOT" && npm run build 2>&1 | tail -10); then
+        success "UI build complete."
+    else
+        warn "UI build failed. The server will still work but the graph UI won't be available."
+    fi
 }
 
 init_neo4j_indexes() {
     info "Initialising Neo4j indexes..."
-    if [[ -f "$PYTHON_DIR/init_db.py" ]]; then
-        "$VENV_DIR/bin/python" "$PYTHON_DIR/init_db.py" 2>/dev/null && success "Neo4j indexes initialised." || warn "Index init script failed — you may need to run it manually."
+    local init_script="$REPO_ROOT/packages/mindreader-ui/server/init-indexes.js"
+    if [[ -f "$init_script" ]]; then
+        NEO4J_URI="$NEO4J_URI" NEO4J_USER="$NEO4J_USER" NEO4J_PASSWORD="$NEO4J_PASSWORD" \
+            node "$init_script" 2>/dev/null && success "Neo4j indexes initialised." || warn "Index init script failed - you may need to run it manually."
     else
-        warn "No init_db.py found — skipping index initialisation."
+        warn "No init-indexes.js found - skipping index initialisation."
     fi
 }
 
