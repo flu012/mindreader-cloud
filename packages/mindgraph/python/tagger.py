@@ -29,7 +29,7 @@ Tags should capture:
 - Roles (engineer, swimmer, manager, owner)
 - Relationships (daughter, wife, colleague)
 - Skills/interests (swimming, coding)
-- Locations (Auckland, NZ)
+- Locations (city, country)
 - Technologies (Python, React, Docker)
 - Business traits (ASX-listed, franchise)
 

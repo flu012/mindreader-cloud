@@ -10,3 +10,5 @@ __pycache__/
 .worktrees/
 .superpowers/
 docs/superpowers/
+docs/test-results.md
+docs/images/self-evolving-upload.mp4

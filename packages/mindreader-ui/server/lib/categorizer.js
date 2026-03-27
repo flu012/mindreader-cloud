@@ -53,7 +53,7 @@ async function seedDefaultCategories(driver, logger) {
     // Entity-type categories
     { key: "person", label: "Person", color: "#4aff9e", keywords: "person,wife,husband,engineer,developer,daughter,son,child,married,family,colleague,human,lives in", order: 10 },
     { key: "project", label: "Project", color: "#4a9eff", keywords: "project,is a project,repository,codebase,app,application", order: 20 },
-    { key: "location", label: "Location", color: "#ffdd4a", keywords: "city,country,region,address,located in,based in,new zealand,auckland,wellington,sydney,australia,china,singapore,indonesia,office,building,island,street,suburb,district,province", order: 30 },
+    { key: "location", label: "Location", color: "#ffdd4a", keywords: "city,country,region,address,located in,based in,office,building,island,street,suburb,district,province", order: 30 },
     { key: "infrastructure", label: "Infrastructure", color: "#ff9e4a", keywords: "infrastructure,database,server,container,docker,logging,payment,deploy,hosting,neo4j,sql server,seq,stripe,nginx,iis,service bus,api,endpoint,domain", order: 40 },
     { key: "agent", label: "Agent", color: "#9e4aff", keywords: "agent,bot,assistant,monday,tuesday,wednesday,thursday,friday,saturday,sunday", order: 50 },
     { key: "companies", label: "Companies", color: "#ff4a9e", keywords: "company,organisation,ltd,corp,inc,business,startup", order: 60 },
@@ -126,7 +126,7 @@ function categorizeEntity(name, summary, category) {
   const fallback = [
     ["person", ["person", "wife", "husband", "engineer", "developer", "daughter", "son", "child", "married", "family", "colleague", "human", "lives in"]],
     ["project", ["project", "is a project", "repository", "codebase", "app", "application"]],
-    ["location", ["city", "country", "region", "address", "located in", "based in", "new zealand", "auckland", "wellington", "sydney", "australia", "china", "singapore", "indonesia", "office", "building", "island", "street", "suburb", "district", "province"]],
+    ["location", ["city", "country", "region", "address", "located in", "based in", "office", "building", "island", "street", "suburb", "district", "province"]],
     ["infrastructure", ["infrastructure", "database", "server", "container", "docker", "logging", "payment", "deploy", "hosting", "neo4j", "sql server", "seq", "stripe", "nginx", "iis", "service bus", "api", "endpoint", "domain"]],
     ["agent", ["agent", "bot", "assistant", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]],
     ["companies", ["company", "organisation", "ltd", "corp", "inc", "business", "startup"]],
@@ -205,7 +205,7 @@ For tags, extract 1-8 lowercase descriptive tags per entity covering:
 - Roles (engineer, swimmer, manager, owner)
 - Relationships (daughter, wife, colleague)
 - Skills/interests (swimming, coding)
-- Locations (Auckland, NZ)
+- Locations (city, country)
 - Technologies (Python, React, Docker)
 - Business traits (ASX-listed, franchise)
 Do not repeat the category as a tag. If the entity is noise, use empty tags.
