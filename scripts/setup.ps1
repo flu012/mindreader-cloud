@@ -296,7 +296,7 @@ function Step-LLM {
         }
         "3" {
             $script:LlmProvider = "dashscope"
-            $script:LlmBaseUrl = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+            $script:LlmBaseUrl = "https://coding.dashscope.aliyuncs.com/v1"
             $defaultModel = "qwen3.5-flash"
         }
         default {

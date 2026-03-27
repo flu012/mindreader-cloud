@@ -383,7 +383,7 @@ step_llm() {
             ;;
         3)
             LLM_PROVIDER="dashscope"
-            LLM_BASE_URL="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+            LLM_BASE_URL="https://coding.dashscope.aliyuncs.com/v1"
             LLM_DEFAULT_MODEL="qwen3.5-flash"
             ;;
         *)
@@ -428,7 +428,7 @@ step_llm() {
             ;;
         2)
             EMBEDDER_PROVIDER="dashscope"
-            EMBEDDER_BASE_URL="https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+            EMBEDDER_BASE_URL="https://coding.dashscope.aliyuncs.com/v1"
             EMBEDDER_DEFAULT_MODEL="text-embedding-v4"
             EMBEDDER_API_KEY="$(ask_secret "API key for DashScope embedder (Enter to reuse LLM key)" "$LLM_API_KEY")"
             ;;

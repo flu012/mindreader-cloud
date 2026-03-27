@@ -11,7 +11,7 @@
       "models": ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"]
     },
     "dashscope": {
-      "baseUrl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
       "defaultModel": "qwen3.5-flash",
       "models": ["qwen3.5-flash", "qwen3.5-plus"]
     }
@@ -22,7 +22,7 @@
       "defaultModel": "text-embedding-3-small"
     },
     "dashscope": {
-      "baseUrl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "baseUrl": "https://coding.dashscope.aliyuncs.com/v1",
       "defaultModel": "text-embedding-v4"
     }
   }
