@@ -154,12 +154,23 @@ const mindreaderPlugin = {
       api.on("agent_end", async (event) => {
         if (!event.success || !event.messages?.length) return;
         try {
+          // Only send the last N messages to avoid huge payloads.
+          // Take recent messages and truncate content to captureMaxChars total.
+          const maxChars = cfg.captureMaxChars || 2000;
+          const recent = [];
+          let charCount = 0;
+          for (let i = event.messages.length - 1; i >= 0 && charCount < maxChars; i--) {
+            const msg = event.messages[i];
+            const text = typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content || "");
+            charCount += text.length;
+            recent.unshift({ role: msg.role, content: text.slice(0, maxChars) });
+          }
           await serverFetch(port, "/api/cli/capture", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              messages: event.messages,
-              captureMaxChars: cfg.captureMaxChars,
+              messages: recent,
+              captureMaxChars: maxChars,
             }),
           });
         } catch (err) {
