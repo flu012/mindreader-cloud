@@ -13,6 +13,7 @@
 
 import { callLLM } from "./llm.js";
 import { synthesizeDetails } from "./details.js";
+import { MAX_SUMMARY_LENGTH, MAX_DETAILS_LENGTH } from "./constants.js";
 
 // Graphiti custom_extraction_instructions — always injected as last line of defense
 export const EXTRACTION_INSTRUCTIONS = `CRITICAL: Attributes are NOT entities. Do NOT create separate entity nodes for:
@@ -254,7 +255,7 @@ export async function applyEntityUpdate(update, driver, config) {
     let newSummary = oldSummary;
     if (update.summaryAppend) {
       const sep = oldSummary ? ". " : "";
-      newSummary = (oldSummary + sep + update.summaryAppend).slice(0, 200);
+      newSummary = (oldSummary + sep + update.summaryAppend).slice(0, MAX_SUMMARY_LENGTH);
     }
 
     // Synthesize details: merge new facts with existing details via LLM
@@ -279,7 +280,7 @@ export async function applyEntityUpdate(update, driver, config) {
         newDetails = oldDetails
           ? `${oldDetails}\n\n${update.summaryAppend}`
           : update.summaryAppend;
-        newDetails = newDetails.slice(0, 10000);
+        newDetails = newDetails.slice(0, MAX_DETAILS_LENGTH);
       }
     }
 
