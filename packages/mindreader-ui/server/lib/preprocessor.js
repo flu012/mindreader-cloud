@@ -219,10 +219,9 @@ function parseClassifyResponse(response, source, project, knownEntityNames) {
       result.forGraphiti.push({ content: fact.text, source, project });
     } else if (fact.type === "attribute" && fact.entity_name && !knownEntityNames.has(fact.entity_name)) {
       // LLM classified as attribute but entity is unknown — forward to Graphiti
-      // so it can create the entity WITH proper relationships
-      const text = fact.summary_append
-        ? `${fact.entity_name}: ${fact.summary_append}`
-        : fact.entity_name;
+      // so it can create the entity WITH proper relationships.
+      // Include the full summary_append as context for relationship extraction.
+      const text = fact.summary_append || fact.entity_name;
       result.forGraphiti.push({ content: text, source, project });
     }
   }
@@ -281,9 +280,7 @@ export async function executePreprocessResult(result, driver, mgDaemon, config, 
       } else {
         // Entity not found in Neo4j — forward to Graphiti so it can create it
         logger?.info?.(`Preprocessor: entity "${update.name}" not found, forwarding to Graphiti`);
-        const text = update.summaryAppend
-          ? `${update.name}: ${update.summaryAppend}`
-          : update.name;
+        const text = update.summaryAppend || update.name;
         result.forGraphiti.push({ content: text, source: "preprocessor-fallback" });
       }
     } catch (err) {
@@ -291,13 +288,18 @@ export async function executePreprocessResult(result, driver, mgDaemon, config, 
     }
   }
 
-  // 2. Feed remaining items to Graphiti (with custom_extraction_instructions)
-  for (const item of result.forGraphiti) {
+  // 2. Feed items to Graphiti — batch into a single episode so Graphiti can
+  //    see all entities together and create proper cross-references.
+  if (result.forGraphiti.length > 0) {
+    const batchContent = result.forGraphiti.map(item => item.content).join("\n");
+    const source = result.forGraphiti[0].source || "preprocessor";
+    const project = result.forGraphiti.find(item => item.project)?.project;
     try {
+      logger?.info?.(`Preprocessor: sending ${result.forGraphiti.length} facts to Graphiti as single episode (${batchContent.length} chars)`);
       await mgDaemon("add", {
-        content: item.content,
-        source: item.source,
-        project: item.project || undefined,
+        content: batchContent,
+        source,
+        project: project || undefined,
         custom_instructions: EXTRACTION_INSTRUCTIONS,
       }, 120000);
     } catch (err) {
