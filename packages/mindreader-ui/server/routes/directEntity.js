@@ -7,8 +7,7 @@
 import { randomUUID } from "node:crypto";
 import neo4j from "neo4j-driver";
 import { query } from "../neo4j.js";
-
-const MAX_BATCH_SIZE = 100;
+import { MAX_SUMMARY_LENGTH, MAX_DETAILS_LENGTH, MAX_DIRECT_ENTITY_BATCH } from "../lib/constants.js";
 
 export function registerRoutes(app, ctx) {
   const { driver, logger } = ctx;
@@ -29,8 +28,8 @@ export function registerRoutes(app, ctx) {
       if (!Array.isArray(entities) || entities.length === 0) {
         return res.status(400).json({ error: "Request body must contain a non-empty 'entities' array." });
       }
-      if (entities.length > MAX_BATCH_SIZE) {
-        return res.status(400).json({ error: `Batch size exceeds maximum of ${MAX_BATCH_SIZE}.` });
+      if (entities.length > MAX_DIRECT_ENTITY_BATCH) {
+        return res.status(400).json({ error: `Batch size exceeds maximum of ${MAX_DIRECT_ENTITY_BATCH}.` });
       }
 
       // Validate each entity
@@ -71,7 +70,7 @@ export function registerRoutes(app, ctx) {
             const name = entity.name.trim();
             const tags = (entity.tags || []).map(t => String(t).toLowerCase().trim()).filter(Boolean);
             const summary = (entity.summary || "").trim();
-            const details = (entity.details || "").trim().slice(0, 10000);
+            const details = (entity.details || "").trim().slice(0, MAX_DETAILS_LENGTH);
             const category = (entity.category || "").toLowerCase().trim() || null;
             const now = new Date().toISOString();
 
@@ -91,7 +90,7 @@ export function registerRoutes(app, ctx) {
               let newSummary = oldSummary;
               if (summary) {
                 const sep = oldSummary ? ". " : "";
-                newSummary = (oldSummary + sep + summary).slice(0, 2000);
+                newSummary = (oldSummary + sep + summary).slice(0, MAX_SUMMARY_LENGTH);
               }
               const oldDetails = existing.records[0].get("details") || "";
               let newDetails = details || oldDetails;

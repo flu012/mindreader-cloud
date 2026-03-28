@@ -17,9 +17,11 @@ import { createDecayJob } from "./lib/decay.js";
 // Route modules
 import { registerRoutes as registerGraphRoutes } from "./routes/graph.js";
 import { registerRoutes as registerEntityRoutes } from "./routes/entity.js";
+import { registerRoutes as registerEvolveRoutes } from "./routes/evolve.js";
 import { registerRoutes as registerCategoryRoutes } from "./routes/categories.js";
 import { registerRoutes as registerSearchRoutes } from "./routes/search.js";
 import { registerRoutes as registerCleanupRoutes } from "./routes/cleanup.js";
+import { registerRoutes as registerDecayRoutes } from "./routes/decay.js";
 import { registerRoutes as registerAuditRoutes } from "./routes/audit.js";
 import { registerRoutes as registerTokenRoutes } from "./routes/tokens.js";
 import { registerRoutes as registerCliRoutes } from "./routes/cli.js";
@@ -87,9 +89,11 @@ export function createServer(config, logger) {
   // ========================================================================
   registerGraphRoutes(app, ctx);
   registerEntityRoutes(app, ctx);
+  registerEvolveRoutes(app, ctx);
   registerCategoryRoutes(app, ctx);
   registerSearchRoutes(app, ctx);
   registerCleanupRoutes(app, ctx);
+  registerDecayRoutes(app, ctx);
   registerAuditRoutes(app, ctx);
   registerTokenRoutes(app, ctx);
   registerCliRoutes(app, ctx);
@@ -158,6 +162,7 @@ export function startServer(configOverrides, logger, { eagerDaemon = false } = {
     autoCategorizer.stop();
     decayJob.stop();
     if (app._stopDaemon) app._stopDaemon();
+    closeDriver();
   });
 
   server.on("error", (err) => {
