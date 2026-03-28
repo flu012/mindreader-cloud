@@ -89,11 +89,12 @@ export default function App() {
     setLoading(true);
     // Graph view: 500 nodes is enough for visualization
     // Server prioritizes non-"other" categories
-    fetch("/api/graph?limit=500")
+    const graphUrl = `/api/graph?limit=500${showDecay ? "&showExpired=true" : ""}`;
+    fetch(graphUrl)
       .then((r) => r.json())
       .then((graph) => { setGraphData(graph); setLoading(false); })
       .catch((err) => { console.error("Failed to load graph:", err); setLoading(false); });
-  }, [refreshKey, activeTab]);
+  }, [refreshKey, activeTab, showDecay]);
 
   const handleRefresh = useCallback(() => {
     setRefreshKey((k) => k + 1);

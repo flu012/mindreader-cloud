@@ -284,15 +284,19 @@ const GraphView = forwardRef(function GraphView(
       const color = (colors || CATEGORY_COLORS)[node.category] || CATEGORY_COLORS.other;
       const size = GROUP_SIZES[node.category] || GROUP_SIZES.other;
 
+      const isExpired = !!node.expired_at;
+      const strength = isExpired ? 0 : (node.strength ?? 1.0);
+
       graph.addNode(node.id, {
         label: node.name || "unknown",
         x, y,
-        size,
-        color,
-        origColor: color,
-        origSize: size,
+        size: isExpired ? size * 0.7 : size,
+        color: isExpired ? "rgba(100,100,120,0.25)" : color,
+        origColor: isExpired ? "#666678" : color,
+        origSize: isExpired ? size * 0.7 : size,
         category: node.category,
-        strength: node.strength ?? 1.0,
+        strength,
+        expired: isExpired,
       });
     });
 
