@@ -1,12 +1,10 @@
 /**
  * Category routes — /api/categories/* + /api/recategorize
  */
-import path from "node:path";
-import { tmpdir } from "node:os";
 import neo4j from "neo4j-driver";
 import { query } from "../neo4j.js";
 import { getCategories, categorizeEntity } from "../lib/categorizer.js";
-import { venvPython } from "../config.js";
+import { callLLM } from "../lib/llm.js";
 
 export function registerRoutes(app, ctx) {
   const { driver, config, logger } = ctx;
@@ -286,67 +284,21 @@ Rules:
 
 Return ONLY a JSON array: [{"idx": 0, "category": "person"}, ...]`;
 
-        const { execFile: ef } = await import("node:child_process");
-        const { promisify: pm } = await import("node:util");
-        const { writeFileSync: wfs, unlinkSync: uls } = await import("node:fs");
-        const efa = pm(ef);
-
-        const recatUid = Math.random().toString(36).slice(2, 8);
-        const tmpPrompt = path.join(tmpdir(), `mg_recat_${Date.now()}_${recatUid}.json`);
-        wfs(tmpPrompt, JSON.stringify(prompt));
-
-        const pyScript = `
-import os, json
-with open(os.getenv("MG_PROMPT_FILE")) as f:
-    prompt = json.load(f)
-if os.getenv("LLM_PROVIDER", "").lower() == "anthropic":
-    import anthropic
-    client = anthropic.Anthropic(api_key=os.getenv("LLM_API_KEY"))
-    resp = client.messages.create(model=os.getenv("MG_MODEL", "claude-sonnet-4-6"), system="You MUST respond with valid JSON only. No markdown code blocks.", messages=[{"role": "user", "content": prompt}], temperature=0.1, max_tokens=2000)
-    text = resp.content[0].text.strip()
-else:
-    from openai import OpenAI
-    client = OpenAI(api_key=os.getenv("LLM_API_KEY"), base_url=os.getenv("LLM_BASE_URL"))
-    kwargs = dict(model=os.getenv("MG_MODEL", "gpt-4o-mini"), messages=[{"role": "user", "content": prompt}], temperature=0.1, max_tokens=2000, response_format={"type": "json_object"})
-    if "dashscope" in (os.getenv("LLM_BASE_URL") or ""):
-        kwargs["extra_body"] = {"enable_thinking": False}
-    resp = client.chat.completions.create(**kwargs)
-    text = resp.choices[0].message.content.strip()
-fence = chr(96)*3
-if text.startswith(fence + "json"): text = text[len(fence)+4:]
-if text.startswith(fence): text = text[len(fence):]
-if text.endswith(fence): text = text[:-len(fence)]
-text = text.strip()
-try:
-    data = json.loads(text)
-    if isinstance(data, list):
-        print(json.dumps(data))
-    elif isinstance(data, dict):
-        items = data.get("entities", data.get("results", data.get("items", [])))
-        print(json.dumps(items if isinstance(items, list) else []))
-    else:
-        print("[]")
-except Exception:
-    print("[]")
-`;
-        const tmpScript = path.join(tmpdir(), `mg_recat_${Date.now()}_${recatUid}.py`);
-        wfs(tmpScript, pyScript);
-
-        const pyExe = venvPython(config.pythonPath);
-        const pyEnv = { ...process.env, PYTHONUNBUFFERED: "1" };
-        if (config.llmApiKey) pyEnv.LLM_API_KEY = config.llmApiKey;
-        if (config.llmBaseUrl) pyEnv.LLM_BASE_URL = config.llmBaseUrl;
-        if (config.llmProvider) pyEnv.LLM_PROVIDER = config.llmProvider;
-        pyEnv.MG_PROMPT_FILE = tmpPrompt;
-        pyEnv.MG_MODEL = config.llmExtractModel || config.llmModel;
-
+        // Call LLM directly via callLLM()
+        const llmConfig = { ...config, llmModel: config.llmExtractModel || config.llmModel };
         let assignments;
         try {
-          const { stdout } = await efa(pyExe, [tmpScript], { timeout: 60000, env: pyEnv });
-          assignments = JSON.parse(stdout.trim());
-        } finally {
-          try { uls(tmpScript); } catch {}
-          try { uls(tmpPrompt); } catch {}
+          const response = await callLLM({
+            prompt,
+            config: llmConfig,
+            jsonMode: true,
+            timeoutMs: 60000,
+          });
+          assignments = Array.isArray(response)
+            ? response
+            : (response.entities || response.results || response.items || []);
+        } catch (llmErr) {
+          return res.status(500).json({ error: `LLM call failed: ${llmErr.message}` });
         }
 
         if (!Array.isArray(assignments)) {
