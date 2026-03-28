@@ -46,10 +46,10 @@ export function registerRoutes(app, ctx) {
            RETURN id(e) AS id, substring(e.content, 0, 100) AS content_preview,
                   e.source_description AS source, e.created_at AS created_at`
         ),
-        // Expired relationships
+        // Expired relationships (Graphiti-invalidated only, not decay-expired)
         query(driver,
           `MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity)
-           WHERE r.expired_at IS NOT NULL
+           WHERE r.expired_at IS NOT NULL AND r.strength IS NULL
            RETURN a.name AS source, r.name AS relation, b.name AS target, r.expired_at AS expired_at`
         ),
         // Duplicate relationships: same source->target with same relation name
@@ -158,7 +158,7 @@ export function registerRoutes(app, ctx) {
       if (safeActions.includes("expired_relationships")) {
         const res2 = await query(driver,
           `MATCH ()-[r:RELATES_TO]->()
-           WHERE r.expired_at IS NOT NULL
+           WHERE r.expired_at IS NOT NULL AND r.strength IS NULL
            DELETE r
            RETURN count(r) AS deleted`
         );
@@ -575,8 +575,12 @@ except Exception:
     try {
       const decayJob = req.app._decayJob;
       if (decayJob?.runNow) {
-        await decayJob.runNow();
-        res.json({ ok: true, message: "Decay cycle completed." });
+        const ran = await decayJob.runNow();
+        if (ran) {
+          res.json({ ok: true, message: "Decay cycle completed." });
+        } else {
+          res.json({ ok: true, message: "Decay cycle already running, skipped." });
+        }
       } else {
         res.json({ ok: false, message: "Decay job not available." });
       }

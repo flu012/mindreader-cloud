@@ -77,6 +77,7 @@ export async function findKnownEntities(text, driver, timeoutMs = 3000) {
         session.run(
           `MATCH (e:Entity)
            WHERE ANY(word IN $words WHERE toLower(e.name) CONTAINS toLower(word))
+             AND e.expired_at IS NULL
            RETURN e.name AS name, e.summary AS summary, e.tags AS tags, e.category AS category
            ORDER BY size(e.name) ASC
            LIMIT 10`,

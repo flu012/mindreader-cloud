@@ -37,6 +37,7 @@ export function registerRoutes(app, ctx) {
          WHERE (toLower(r.fact) CONTAINS toLower($q)
             OR toLower(r.name) CONTAINS toLower($q))
            AND r.expired_at IS NULL
+           AND a.expired_at IS NULL AND b.expired_at IS NULL
          RETURN a.name AS source, r.name AS relation, r.fact AS fact, b.name AS target
          LIMIT $limit`,
         { q, limit: neo4j.int(maxLimit) }
@@ -182,7 +183,7 @@ export function registerRoutes(app, ctx) {
       const cypher = `
         MATCH (e:Entity)
         ${whereStr}
-        OPTIONAL MATCH (e)-[r:RELATES_TO]-()
+        OPTIONAL MATCH (e)-[r:RELATES_TO]-() WHERE r.expired_at IS NULL
         WITH e, count(r) AS relCount
         RETURN e.uuid AS uuid, e.name AS name, e.summary AS summary,
                e.created_at AS created_at, COALESCE(e.category, e.group_id, '') AS category, e.node_type AS node_type, e.tags AS tags, relCount

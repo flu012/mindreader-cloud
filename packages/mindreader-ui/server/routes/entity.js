@@ -754,13 +754,13 @@ You may include reasoning text between [ENTITY]/[REL] lines. Aim for 10-25 new e
         if (t.dir === "out") {
           await query(driver,
             `MATCH (k:Entity {name: $keepName}), (o:Entity {name: $otherName})
-             CREATE (k)-[:RELATES_TO {name: $relName, fact: $fact, created_at: datetime(), uuid: randomUUID(), group_id: "", episodes: []}]->(o)`,
+             CREATE (k)-[:RELATES_TO {name: $relName, fact: $fact, created_at: datetime(), uuid: randomUUID(), group_id: "", episodes: [], strength: 1.0, last_accessed_at: datetime()}]->(o)`,
             { keepName, otherName: t.otherName, relName: t.relName, fact: newFact }
           );
         } else {
           await query(driver,
             `MATCH (o:Entity {name: $otherName}), (k:Entity {name: $keepName})
-             CREATE (o)-[:RELATES_TO {name: $relName, fact: $fact, created_at: datetime(), uuid: randomUUID(), group_id: "", episodes: []}]->(k)`,
+             CREATE (o)-[:RELATES_TO {name: $relName, fact: $fact, created_at: datetime(), uuid: randomUUID(), group_id: "", episodes: [], strength: 1.0, last_accessed_at: datetime()}]->(k)`,
             { keepName, otherName: t.otherName, relName: t.relName, fact: newFact }
           );
         }
@@ -814,7 +814,8 @@ You may include reasoning text between [ENTITY]/[REL] lines. Aim for 10-25 new e
          CREATE (s)-[:RELATES_TO {
            name: $relationName, fact: $fact,
            created_at: datetime(), uuid: randomUUID(),
-           group_id: "", episodes: []
+           group_id: "", episodes: [],
+           strength: 1.0, last_accessed_at: datetime()
          }]->(t)`,
         { sourceName, targetName, relationName, fact: fact || `${sourceName} ${relationName} ${targetName}` }
       );

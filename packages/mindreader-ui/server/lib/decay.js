@@ -87,14 +87,14 @@ export function createDecayJob(driver, config, logger) {
   const intervalMs = config.memoryDecayIntervalMs || 3600000;
 
   async function runDecayCycle() {
-    if (_running) return;
+    if (_running) return false;
     _running = true;
     const session = driver.session();
     try {
       // Step 1: Calculate and update strength for all active edges
       const edgeResult = await session.run(
         `MATCH ()-[r:RELATES_TO]->() WHERE r.expired_at IS NULL
-         WITH r, duration.inSeconds(coalesce(r.last_accessed_at, r.created_at), datetime()).seconds / 86400.0 AS daysSinceAccess
+         WITH r, duration.inSeconds(coalesce(r.last_accessed_at, r.created_at, datetime()), datetime()).seconds / 86400.0 AS daysSinceAccess
          WITH r, daysSinceAccess, exp(-1.0 * $lambda * daysSinceAccess) AS newStrength
          SET r.strength = newStrength
          RETURN count(r) AS updated`,
@@ -114,7 +114,7 @@ export function createDecayJob(driver, config, logger) {
       // Step 3: Calculate and update strength for all active entities
       const entityResult = await session.run(
         `MATCH (e:Entity) WHERE e.expired_at IS NULL
-         WITH e, duration.inSeconds(coalesce(e.last_accessed_at, e.created_at), datetime()).seconds / 86400.0 AS daysSinceAccess
+         WITH e, duration.inSeconds(coalesce(e.last_accessed_at, e.created_at, datetime()), datetime()).seconds / 86400.0 AS daysSinceAccess
          WITH e, daysSinceAccess, exp(-1.0 * $lambda * daysSinceAccess) AS newStrength
          SET e.strength = newStrength
          RETURN count(e) AS updated`,
@@ -145,8 +145,10 @@ export function createDecayJob(driver, config, logger) {
       if (edgesExpired > 0 || entitiesExpired > 0 || cascaded > 0) {
         logger?.info?.(`Decay: edges=${edgesUpdated} updated, ${edgesExpired} expired | entities=${entitiesUpdated} updated, ${entitiesExpired} expired | ${cascaded} cascade-expired`);
       }
+      return true;
     } catch (err) {
       logger?.warn?.(`Decay cycle error: ${err.message}`);
+      return false;
     } finally {
       await session.close();
       _running = false;

@@ -20,7 +20,7 @@ export function registerRoutes(app, ctx) {
 
       // Get all entity categories to count
       const entityRows = await query(driver,
-        `MATCH (e:Entity) RETURN COALESCE(e.category, e.group_id, '') AS category`
+        `MATCH (e:Entity) WHERE e.expired_at IS NULL RETURN COALESCE(e.category, e.group_id, '') AS category`
       );
       const catKeys = new Set(freshCats.map((c) => c.key));
 
@@ -37,7 +37,7 @@ export function registerRoutes(app, ctx) {
       }
       // Also auto-categorize entities with no manual category
       const uncat = await query(driver,
-        `MATCH (e:Entity) WHERE (e.group_id IS NULL AND e.category IS NULL) OR NOT COALESCE(e.category, e.group_id, '') IN $keys RETURN e.name AS name, e.summary AS summary, COALESCE(e.category, e.group_id, '') AS category`,
+        `MATCH (e:Entity) WHERE e.expired_at IS NULL AND ((e.group_id IS NULL AND e.category IS NULL) OR NOT COALESCE(e.category, e.group_id, '') IN $keys) RETURN e.name AS name, e.summary AS summary, COALESCE(e.category, e.group_id, '') AS category`,
         { keys: [...catKeys] }
       );
       const autoCounts = {};
@@ -135,7 +135,7 @@ export function registerRoutes(app, ctx) {
       if (key === "other") {
         // Entities with no category or category not in any Category node
         const rows = await query(driver,
-          `MATCH (e:Entity) WHERE (e.group_id IS NULL AND e.category IS NULL) OR NOT COALESCE(e.category, e.group_id, '') IN $keys
+          `MATCH (e:Entity) WHERE e.expired_at IS NULL AND ((e.group_id IS NULL AND e.category IS NULL) OR NOT COALESCE(e.category, e.group_id, '') IN $keys)
            RETURN e.uuid AS uuid, e.name AS name, e.summary AS summary, e.created_at AS created_at, e.node_type AS node_type, COALESCE(e.category, e.group_id, '') AS category
            ORDER BY e.name`,
           { keys: catKeys }
@@ -153,7 +153,7 @@ export function registerRoutes(app, ctx) {
       } else {
         // Entities with explicit category = key OR auto-categorized to key
         const rows = await query(driver,
-          `MATCH (e:Entity)
+          `MATCH (e:Entity) WHERE e.expired_at IS NULL
            RETURN e.uuid AS uuid, e.name AS name, e.summary AS summary, e.created_at AS created_at, e.node_type AS node_type, COALESCE(e.category, e.group_id, '') AS category
            ORDER BY e.name`
         );
@@ -235,12 +235,12 @@ export function registerRoutes(app, ctx) {
 
       let cypher;
       if (scope === "all") {
-        cypher = `MATCH (e:Entity) RETURN e.name AS name, e.summary AS summary, elementId(e) AS eid, e.category AS oldCat ORDER BY e.name SKIP $skip LIMIT $limit`;
+        cypher = `MATCH (e:Entity) WHERE e.expired_at IS NULL RETURN e.name AS name, e.summary AS summary, elementId(e) AS eid, e.category AS oldCat ORDER BY e.name SKIP $skip LIMIT $limit`;
       } else if (scope === "uncategorized") {
-        cypher = `MATCH (e:Entity) WHERE e.category IS NULL OR e.category = '' RETURN e.name AS name, e.summary AS summary, elementId(e) AS eid, e.category AS oldCat LIMIT $limit`;
+        cypher = `MATCH (e:Entity) WHERE e.expired_at IS NULL AND (e.category IS NULL OR e.category = '') RETURN e.name AS name, e.summary AS summary, elementId(e) AS eid, e.category AS oldCat LIMIT $limit`;
       } else {
         // Default: "other" — re-categorize entities currently tagged as "other"
-        cypher = `MATCH (e:Entity) WHERE e.category = 'other' OR e.category IS NULL OR e.category = '' RETURN e.name AS name, e.summary AS summary, elementId(e) AS eid, e.category AS oldCat LIMIT $limit`;
+        cypher = `MATCH (e:Entity) WHERE e.expired_at IS NULL AND (e.category = 'other' OR e.category IS NULL OR e.category = '') RETURN e.name AS name, e.summary AS summary, elementId(e) AS eid, e.category AS oldCat LIMIT $limit`;
       }
 
       const session = driver.session();
@@ -373,13 +373,13 @@ except Exception:
         let remaining;
         if (scope === "all") {
           // For "all" scope, remaining = total - (skip + batch processed)
-          const remainResult = await session.run(`MATCH (e:Entity) RETURN count(e) AS cnt`);
+          const remainResult = await session.run(`MATCH (e:Entity) WHERE e.expired_at IS NULL RETURN count(e) AS cnt`);
           const total = remainResult.records[0]?.get("cnt")?.toNumber?.() || remainResult.records[0]?.get("cnt") || 0;
           remaining = Math.max(0, total - safeSkip - records.length);
         } else {
           // For other/uncategorized scopes, re-count matching entities (already reflects changes)
           const remainResult = await session.run(
-            `MATCH (e:Entity) WHERE e.category = 'other' OR e.category IS NULL OR e.category = '' RETURN count(e) AS cnt`
+            `MATCH (e:Entity) WHERE e.expired_at IS NULL AND (e.category = 'other' OR e.category IS NULL OR e.category = '') RETURN count(e) AS cnt`
           );
           remaining = remainResult.records[0]?.get("cnt")?.toNumber?.() || remainResult.records[0]?.get("cnt") || 0;
         }
