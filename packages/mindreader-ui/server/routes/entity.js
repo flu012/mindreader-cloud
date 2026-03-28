@@ -1,8 +1,6 @@
 /**
  * Entity routes — all /api/entity/:name routes + /api/merge + /api/link
  */
-import path from "node:path";
-import { tmpdir } from "node:os";
 import neo4j from "neo4j-driver";
 import { query, nodeToPlain, relToPlain } from "../neo4j.js";
 import { categorizeEntity } from "../lib/categorizer.js";
@@ -10,7 +8,7 @@ import { reinforceEntity } from "../lib/decay.js";
 import { EXTRACTION_INSTRUCTIONS } from "../lib/preprocessor.js";
 import { synthesizeDetails } from "../lib/details.js";
 import { MAX_DETAILS_LENGTH } from "../lib/constants.js";
-import { venvPython } from "../config.js";
+import { callLLM } from "../lib/llm.js";
 
 export function registerRoutes(app, ctx) {
   const { driver, config, logger, mgDaemon } = ctx;
@@ -187,56 +185,14 @@ ${connectedInfo || "None"}
 
 Write a 200-word summary:`;
 
-      // Call LLM via Python
-      const { execFile } = await import("node:child_process");
-      const { promisify } = await import("node:util");
-      const { writeFileSync, unlinkSync } = await import("node:fs");
-      const execFileAsync = promisify(execFile);
-
-      const sumUid = Math.random().toString(36).slice(2, 8);
-      const tmpPrompt = path.join(tmpdir(), `mg_summarize_${Date.now()}_${sumUid}.json`);
-      writeFileSync(tmpPrompt, JSON.stringify(llmPrompt));
-
-      const extractModel = config.llmExtractModel || config.llmModel;
-      const pyScript = `
-import os, json
-with open(os.getenv("MG_PROMPT_FILE")) as f:
-    prompt = json.load(f)
-if os.getenv("LLM_PROVIDER", "").lower() == "anthropic":
-    import anthropic
-    client = anthropic.Anthropic(api_key=os.getenv("LLM_API_KEY"))
-    resp = client.messages.create(model=os.getenv("MG_MODEL", "claude-sonnet-4-6"), messages=[{"role": "user", "content": prompt}], temperature=0.3, max_tokens=400)
-    print(resp.content[0].text.strip())
-else:
-    from openai import OpenAI
-    client = OpenAI(api_key=os.getenv("LLM_API_KEY"), base_url=os.getenv("LLM_BASE_URL"))
-    kwargs = dict(model=os.getenv("MG_MODEL", "gpt-4o-mini"), messages=[{"role": "user", "content": prompt}], temperature=0.3, max_tokens=400)
-    if "dashscope" in (os.getenv("LLM_BASE_URL") or ""):
-        kwargs["extra_body"] = {"enable_thinking": False}
-    resp = client.chat.completions.create(**kwargs)
-    print(resp.choices[0].message.content.strip())
-`;
-
-      const tmpScript = path.join(tmpdir(), `mg_summarize_${Date.now()}_${sumUid}.py`);
-      writeFileSync(tmpScript, pyScript);
-
-      const pyEnv = { ...process.env, PYTHONUNBUFFERED: "1" };
-      if (config.llmApiKey) pyEnv.LLM_API_KEY = config.llmApiKey;
-      if (config.llmBaseUrl) pyEnv.LLM_BASE_URL = config.llmBaseUrl;
-      if (config.llmProvider) pyEnv.LLM_PROVIDER = config.llmProvider;
-      pyEnv.MG_PROMPT_FILE = tmpPrompt;
-      pyEnv.MG_MODEL = extractModel;
-
-      const pyExe = venvPython(config.pythonPath);
-      const { stdout } = await execFileAsync(pyExe, [tmpScript], {
-        timeout: 120000,
-        env: pyEnv,
+      // Call LLM directly via callLLM() (plain text, not JSON)
+      const llmConfig = { ...config, llmModel: config.llmExtractModel || config.llmModel };
+      const generatedSummary = await callLLM({
+        prompt: llmPrompt,
+        config: llmConfig,
+        jsonMode: false,
+        timeoutMs: 120000,
       });
-
-      try { unlinkSync(tmpScript); } catch {}
-      try { unlinkSync(tmpPrompt); } catch {}
-
-      const generatedSummary = stdout.trim();
 
       // Save explanation to the Entity node in Neo4j (separate from summary)
       try {
