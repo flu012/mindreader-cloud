@@ -7,11 +7,11 @@
  * - Items below threshold are auto-expired (soft delete via expired_at)
  * - Entities cascade-expire when all their edges are expired
  *
- * Decay formula: strength = initial * exp(-lambda * days_since_last_access)
+ * Decay formula: strength = exp(-lambda * days_since_last_access)
  * Default lambda=0.03 gives ~23-day half-life for unaccessed memories.
  */
 
-import { query } from "../neo4j.js";
+// Note: uses driver.session() directly for write transactions, not the query() helper.
 
 /**
  * Reinforce an entity and its edges on access (search/recall/view).
@@ -44,10 +44,32 @@ export async function reinforceEntity(driver, entityName, delta = 0.3) {
 
 /**
  * Batch-reinforce multiple entities at once (for search results).
+ * Uses UNWIND to do it in two queries instead of 2*N.
  */
 export async function reinforceEntities(driver, entityNames, delta = 0.3) {
-  for (const name of entityNames) {
-    await reinforceEntity(driver, name, delta);
+  if (!entityNames || entityNames.length === 0) return;
+  const session = driver.session();
+  try {
+    await session.run(
+      `UNWIND $names AS name
+       MATCH (e:Entity) WHERE toLower(e.name) = toLower(name) AND e.expired_at IS NULL
+       SET e.last_accessed_at = datetime(),
+           e.strength = CASE WHEN coalesce(e.strength, 1.0) + $delta > 1.0
+                             THEN 1.0
+                             ELSE coalesce(e.strength, 1.0) + $delta END`,
+      { names: entityNames, delta }
+    );
+    await session.run(
+      `UNWIND $names AS name
+       MATCH (e:Entity)-[r:RELATES_TO]-() WHERE toLower(e.name) = toLower(name) AND r.expired_at IS NULL
+       SET r.last_accessed_at = datetime(),
+           r.strength = CASE WHEN coalesce(r.strength, 1.0) + $delta > 1.0
+                             THEN 1.0
+                             ELSE coalesce(r.strength, 1.0) + $delta END`,
+      { names: entityNames, delta }
+    );
+  } finally {
+    await session.close();
   }
 }
 
@@ -72,7 +94,7 @@ export function createDecayJob(driver, config, logger) {
       // Step 1: Calculate and update strength for all active edges
       const edgeResult = await session.run(
         `MATCH ()-[r:RELATES_TO]->() WHERE r.expired_at IS NULL
-         WITH r, duration.between(coalesce(r.last_accessed_at, r.created_at), datetime()).days AS daysSinceAccess
+         WITH r, duration.inSeconds(coalesce(r.last_accessed_at, r.created_at), datetime()).seconds / 86400.0 AS daysSinceAccess
          WITH r, daysSinceAccess, exp(-1.0 * $lambda * daysSinceAccess) AS newStrength
          SET r.strength = newStrength
          RETURN count(r) AS updated`,
@@ -92,7 +114,7 @@ export function createDecayJob(driver, config, logger) {
       // Step 3: Calculate and update strength for all active entities
       const entityResult = await session.run(
         `MATCH (e:Entity) WHERE e.expired_at IS NULL
-         WITH e, duration.between(coalesce(e.last_accessed_at, e.created_at), datetime()).days AS daysSinceAccess
+         WITH e, duration.inSeconds(coalesce(e.last_accessed_at, e.created_at), datetime()).seconds / 86400.0 AS daysSinceAccess
          WITH e, daysSinceAccess, exp(-1.0 * $lambda * daysSinceAccess) AS newStrength
          SET e.strength = newStrength
          RETURN count(e) AS updated`,

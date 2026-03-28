@@ -603,7 +603,7 @@ except Exception:
            SET r.expired_at = null, r.strength = 1.0, r.last_accessed_at = datetime()`,
           { name }
         );
-        res.json({ ok: true, message: `Restored '${name}' and its relationships.` });
+        res.json({ ok: true });
       } finally {
         await session.close();
       }

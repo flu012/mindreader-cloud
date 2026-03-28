@@ -76,7 +76,7 @@ export function registerRoutes(app, ctx) {
 
       // Group entities by category
       const entityGroups = await query(driver,
-        `MATCH (e:Entity)
+        `MATCH (e:Entity) WHERE e.expired_at IS NULL
          RETURN e.name AS name, e.summary AS summary, COALESCE(e.category, e.group_id, '') AS category
          ORDER BY e.name`
       );
@@ -105,8 +105,8 @@ export function registerRoutes(app, ctx) {
     try {
       const results = await query(driver,
         `MATCH (e:Entity)
-         WHERE toLower(e.summary) CONTAINS 'project'
-            OR toLower(e.summary) CONTAINS 'is a project'
+         WHERE e.expired_at IS NULL AND (toLower(e.summary) CONTAINS 'project'
+            OR toLower(e.summary) CONTAINS 'is a project')
          RETURN DISTINCT e.name AS name, e.summary AS summary, e.uuid AS uuid, e.created_at AS created_at
          ORDER BY e.name`
       );
