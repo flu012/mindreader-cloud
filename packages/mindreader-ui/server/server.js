@@ -17,6 +17,7 @@ import { createDecayJob } from "./lib/decay.js";
 // Route modules
 import { registerRoutes as registerGraphRoutes } from "./routes/graph.js";
 import { registerRoutes as registerEntityRoutes } from "./routes/entity.js";
+import { registerRoutes as registerEvolveRoutes } from "./routes/evolve.js";
 import { registerRoutes as registerCategoryRoutes } from "./routes/categories.js";
 import { registerRoutes as registerSearchRoutes } from "./routes/search.js";
 import { registerRoutes as registerCleanupRoutes } from "./routes/cleanup.js";
@@ -87,6 +88,7 @@ export function createServer(config, logger) {
   // ========================================================================
   registerGraphRoutes(app, ctx);
   registerEntityRoutes(app, ctx);
+  registerEvolveRoutes(app, ctx);
   registerCategoryRoutes(app, ctx);
   registerSearchRoutes(app, ctx);
   registerCleanupRoutes(app, ctx);
