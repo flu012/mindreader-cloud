@@ -147,6 +147,35 @@ WHERE e.created_at <= datetime('2026-03-01')
   AND (e.expired_at IS NULL OR e.expired_at > datetime('2026-03-01'))
 ```
 
+## Entity Details — Rich Knowledge Storage
+
+Each entity has two text fields:
+
+- **Summary** (max 200 chars): Brief identifier used in recall context and search previews
+- **Details** (max 10KB, markdown): Comprehensive information — every fact, relationship context, and historical change
+
+### How Details Are Populated
+
+When new facts are captured about an entity, an LLM synthesizes the existing details with the new information into an updated markdown document. The LLM also generates a concise 200-char summary.
+
+This happens automatically on:
+- **Auto-capture**: conversation facts merged into entity details
+- **Manual store**: `memory_store` tool updates trigger synthesis
+- **Evolve**: web search discoveries merged into details
+- **Direct API**: `POST /api/entities` can set details explicitly
+
+### API
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/entity/:name` | GET | Returns entity with `details` field |
+| `/api/entity/:name/details` | PUT | Update details directly (body: `{ details: "markdown..." }`) |
+| `/api/entities` | POST | Create entities with optional `details` field |
+
+### Search
+
+Details are included in the fulltext search index. Searching for any term in the details will find the entity, even if the summary doesn't mention it.
+
 ## Direct Entity API
 
 For systems that require precise, deterministic memory management without LLM processing:

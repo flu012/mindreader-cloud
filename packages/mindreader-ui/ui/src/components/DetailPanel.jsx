@@ -233,6 +233,11 @@ export default function DetailPanel({ entity, relationships, onClose, onNavigate
         <CollapsibleSummary entityName={entity.name} savedSummary={entity.summary || ""} />
       </Section>
 
+      {/* === Details (collapsible) === */}
+      <Section title="Details" defaultOpen={false} count={entity.details ? `${Math.round((entity.details || "").length / 1024 * 10) / 10}KB` : undefined}>
+        <EditableDetails entityName={entity.name} savedDetails={entity.details || ""} />
+      </Section>
+
       {/* === AI Explanation (collapsed) === */}
       <Section title="AI Explanation" defaultOpen={false}>
         <ExplanationSection entityName={entity.name} savedExplanation={entity.explanation} explanationUpdatedAt={entity.explanation_updated_at} />
@@ -407,6 +412,80 @@ function EditableSummary({ entityName, savedSummary, displayText, truncated, onT
           }}
         >{truncated ? "Show more" : "Show less"}</button>
       )}
+    </div>
+  );
+}
+
+function EditableDetails({ entityName, savedDetails }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(savedDetails || "");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { setValue(savedDetails || ""); }, [savedDetails]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await fetch(`/api/entity/${encodeURIComponent(entityName)}/details`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ details: value }),
+      });
+      setEditing(false);
+    } catch { /* ignore */ }
+    setSaving(false);
+  };
+
+  if (editing) {
+    return (
+      <div>
+        <textarea
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          style={{
+            width: "100%", minHeight: 150, background: "rgba(255,255,255,0.04)",
+            border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6,
+            color: "var(--text-primary)", padding: 8, fontSize: 12,
+            fontFamily: "monospace", resize: "vertical",
+          }}
+        />
+        <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+          <button onClick={handleSave} disabled={saving}
+            style={{ fontSize: 11, padding: "3px 10px", background: "#4aff9e22", color: "#4aff9e", border: "1px solid #4aff9e44", borderRadius: 4, cursor: "pointer" }}>
+            {saving ? "Saving..." : "Save"}
+          </button>
+          <button onClick={() => { setValue(savedDetails || ""); setEditing(false); }}
+            style={{ fontSize: 11, padding: "3px 10px", background: "transparent", color: "var(--text-secondary)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, cursor: "pointer" }}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!savedDetails) {
+    return (
+      <div
+        onClick={() => setEditing(true)}
+        style={{ color: "var(--text-secondary)", fontSize: 12, cursor: "pointer", fontStyle: "italic", padding: "4px 0" }}
+      >
+        No details yet. Click to add.
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div
+        onClick={() => setEditing(true)}
+        style={{
+          fontSize: 12, lineHeight: 1.5, color: "var(--text-primary)",
+          cursor: "pointer", whiteSpace: "pre-wrap", wordBreak: "break-word",
+        }}
+        title="Click to edit"
+      >
+        {savedDetails}
+      </div>
     </div>
   );
 }
