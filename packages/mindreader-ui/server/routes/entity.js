@@ -8,6 +8,7 @@ import { query, nodeToPlain, relToPlain } from "../neo4j.js";
 import { categorizeEntity } from "../lib/categorizer.js";
 import { reinforceEntity } from "../lib/decay.js";
 import { EXTRACTION_INSTRUCTIONS } from "../lib/preprocessor.js";
+import { synthesizeDetails } from "../lib/details.js";
 import { venvPython } from "../config.js";
 
 export function registerRoutes(app, ctx) {
@@ -73,7 +74,7 @@ export function registerRoutes(app, ctx) {
   app.put("/api/entity/:name", async (req, res) => {
     try {
       const { name } = req.params;
-      const { tags, category, summary, node_type, group_id } = req.body || {};
+      const { tags, category, summary, details, node_type, group_id } = req.body || {};
 
       const setClauses = [];
       const params = { name };
@@ -93,6 +94,10 @@ export function registerRoutes(app, ctx) {
       if (summary !== undefined) {
         setClauses.push("e.summary = $summary");
         params.summary = summary;
+      }
+      if (details !== undefined) {
+        setClauses.push("e.details = $details");
+        params.details = String(details).slice(0, 10000);
       }
       if (node_type !== undefined) {
         setClauses.push("e.node_type = $node_type");
@@ -711,6 +716,41 @@ You may include reasoning text between [ENTITY]/[REL] lines. Aim for 10-25 new e
         }
       }
 
+      // Synthesize details from evolved content
+      try {
+        const entityData = await query(driver,
+          `MATCH (e:Entity) WHERE toLower(e.name) = toLower($name)
+           RETURN e.details AS details, e.summary AS summary, e.category AS category, e.tags AS tags`,
+          { name: targetName }
+        );
+        if (entityData.length > 0) {
+          const ent = entityData[0];
+          const evolveFacts = (entities || []).map(e =>
+            `${e.name}: ${e.summary || ""}`
+          ).join("\n") + "\n" + (relationships || []).map(rel =>
+            `${rel.source} ${rel.type} ${rel.target}`
+          ).join("\n");
+
+          const synthesized = await synthesizeDetails({
+            entityName: targetName,
+            existingDetails: ent.details || "",
+            existingSummary: ent.summary || "",
+            newFacts: evolveFacts,
+            category: ent.category || "other",
+            tags: ent.tags || [],
+            config,
+          });
+
+          await query(driver,
+            `MATCH (e:Entity) WHERE toLower(e.name) = toLower($name)
+             SET e.details = $details, e.summary = $summary`,
+            { name: targetName, details: synthesized.details, summary: synthesized.summary }
+          );
+        }
+      } catch (err) {
+        logger?.warn?.(`Details synthesis after evolve failed: ${err.message}`);
+      }
+
       res.json({
         relationshipsProcessed: relationships.length,
         relationshipsStored: storedCount,
@@ -923,6 +963,28 @@ You may include reasoning text between [ENTITY]/[REL] lines. Aim for 10-25 new e
       );
 
       res.json({ ok: true, entity: name, summary });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * PUT /api/entity/:name/details — Update entity details (manual edit)
+   */
+  app.put("/api/entity/:name/details", async (req, res) => {
+    try {
+      const { name } = req.params;
+      const { details } = req.body || {};
+      if (typeof details !== "string") {
+        return res.status(400).json({ error: "Missing 'details' string in body" });
+      }
+      const trimmed = details.slice(0, 10000);
+      await query(driver,
+        `MATCH (e:Entity) WHERE toLower(e.name) = toLower($name)
+         SET e.details = $details, e.last_accessed_at = datetime()`,
+        { name, details: trimmed }
+      );
+      res.json({ ok: true, details: trimmed });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
