@@ -8,10 +8,8 @@
  * - LLM-powered auto-categorization of new entities (interval-based)
  */
 
-import path from "node:path";
-import { tmpdir } from "node:os";
 import { query } from "../neo4j.js";
-import { venvPython } from "../config.js";
+import { callLLM } from "./llm.js";
 
 // ---------------------------------------------------------------------------
 // Category cache
@@ -216,56 +214,21 @@ ${entityList}
 Return ONLY a JSON array: [{"idx": 0, "category": "person", "tags": ["swimmer", "daughter"]}, ...]
 The "category" field MUST be one of: ${validKeys.join(", ")}, other`;
 
-        // Call LLM via Python subprocess
-        const { execFile: ef } = await import("node:child_process");
-        const { promisify: pm } = await import("node:util");
-        const { writeFileSync: wfs, unlinkSync: uls } = await import("node:fs");
-        const efa = pm(ef);
-
-        const autocatUid = Math.random().toString(36).slice(2, 8);
-        const tmpPrompt = path.join(tmpdir(), `mg_autocat_${Date.now()}_${autocatUid}.json`);
-        wfs(tmpPrompt, JSON.stringify(prompt));
-
-        const pyScript = `
-import os, json
-from openai import OpenAI
-client = OpenAI(api_key=os.getenv("LLM_API_KEY"), base_url=os.getenv("LLM_BASE_URL"))
-with open(os.getenv("MG_PROMPT_FILE")) as f:
-    prompt = json.load(f)
-kwargs = dict(model=os.getenv("MG_MODEL", "gpt-4o-mini"), messages=[{"role": "user", "content": prompt}], temperature=0.1, max_tokens=2000, response_format={"type": "json_object"})
-if "dashscope" in (os.getenv("LLM_BASE_URL") or ""):
-    kwargs["extra_body"] = {"enable_thinking": False}
-resp = client.chat.completions.create(**kwargs)
-text = resp.choices[0].message.content.strip()
-try:
-    data = json.loads(text)
-    if isinstance(data, list):
-        print(json.dumps(data))
-    elif isinstance(data, dict):
-        items = data.get("entities", data.get("results", data.get("items", [])))
-        print(json.dumps(items if isinstance(items, list) else []))
-    else:
-        print("[]")
-except Exception:
-    print("[]")
-`;
-        const tmpScript = path.join(tmpdir(), `mg_autocat_${Date.now()}_${autocatUid}.py`);
-        wfs(tmpScript, pyScript);
-
-        const pyExe = venvPython(config.pythonPath);
-        const pyEnv = { ...process.env, PYTHONUNBUFFERED: "1" };
-        if (config.llmApiKey) pyEnv.LLM_API_KEY = config.llmApiKey;
-        if (config.llmBaseUrl) pyEnv.LLM_BASE_URL = config.llmBaseUrl;
-        pyEnv.MG_PROMPT_FILE = tmpPrompt;
-        pyEnv.MG_MODEL = config.llmExtractModel || config.llmModel;
-
+        // Call LLM directly via callLLM()
+        const llmConfig = { ...config, llmModel: config.llmExtractModel || config.llmModel };
         let assignments;
         try {
-          const { stdout } = await efa(pyExe, [tmpScript], { timeout: 30000, env: pyEnv });
-          assignments = JSON.parse(stdout.trim());
-        } finally {
-          try { uls(tmpScript); } catch {}
-          try { uls(tmpPrompt); } catch {}
+          const response = await callLLM({
+            prompt,
+            config: llmConfig,
+            jsonMode: true,
+            timeoutMs: 30000,
+          });
+          assignments = Array.isArray(response)
+            ? response
+            : (response.entities || response.results || response.items || []);
+        } catch {
+          return;
         }
 
         if (!Array.isArray(assignments)) return;
