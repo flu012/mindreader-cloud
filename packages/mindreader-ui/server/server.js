@@ -146,6 +146,7 @@ export function startServer(configOverrides, logger, { eagerDaemon = false } = {
   autoCategorizer.start();
 
   const decayJob = createDecayJob(driver, config, logger);
+  app._decayJob = decayJob;
   decayJob.start();
 
   const server = app.listen(port, () => {
