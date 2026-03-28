@@ -12,6 +12,7 @@ import { getDriver, closeDriver } from "./neo4j.js";
 import { loadConfig } from "./config.js";
 import { createDaemon } from "./lib/daemon.js";
 import { getCategories, seedDefaultCategories, createAutoCategorizer } from "./lib/categorizer.js";
+import { createDecayJob } from "./lib/decay.js";
 
 // Route modules
 import { registerRoutes as registerGraphRoutes } from "./routes/graph.js";
@@ -144,6 +145,9 @@ export function startServer(configOverrides, logger, { eagerDaemon = false } = {
   const autoCategorizer = createAutoCategorizer(driver, config, logger);
   autoCategorizer.start();
 
+  const decayJob = createDecayJob(driver, config, logger);
+  decayJob.start();
+
   const server = app.listen(port, () => {
     logger?.info?.(`MindReader UI: http://localhost:${port}`);
   });
@@ -151,6 +155,7 @@ export function startServer(configOverrides, logger, { eagerDaemon = false } = {
   // Clean up interval and daemon when server closes
   server.on("close", () => {
     autoCategorizer.stop();
+    decayJob.stop();
     if (app._stopDaemon) app._stopDaemon();
   });
 
