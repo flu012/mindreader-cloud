@@ -188,6 +188,8 @@ Write a 200-word summary:`;
         config: llmConfig,
         jsonMode: false,
         timeoutMs: 120000,
+        temperature: 0.3,
+        maxTokens: 400,
       });
 
       // Save explanation to the Entity node in Neo4j (separate from summary)

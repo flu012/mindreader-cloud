@@ -1,6 +1,6 @@
 /**
  * Shared LLM calling utility — supports OpenAI-compatible and Anthropic APIs.
- * Used by preprocessor. Does NOT replace existing Python inline LLM scripts.
+ * Used by preprocessor, categorizer, entity summarize, relationship review, and details synthesis.
  */
 
 /**
@@ -12,27 +12,29 @@
  * @param {boolean} [opts.jsonMode=false] - If true, request JSON response format
  * @param {number} [opts.timeoutMs=10000] - Timeout in ms
  * @param {string} [opts.systemPrompt] - Optional system message
+ * @param {number} [opts.temperature=0.1] - LLM temperature
+ * @param {number} [opts.maxTokens=2000] - Max output tokens
  * @returns {Promise<object|string>} Parsed JSON (if jsonMode) or text
  */
-export async function callLLM({ prompt, config, jsonMode = false, timeoutMs = 10000, systemPrompt }) {
+export async function callLLM({ prompt, config, jsonMode = false, timeoutMs = 10000, systemPrompt, temperature = 0.1, maxTokens = 2000 }) {
   const isAnthropic = config.llmProvider === "anthropic";
 
   if (isAnthropic) {
-    return callAnthropic({ prompt, config, jsonMode, timeoutMs, systemPrompt });
+    return callAnthropic({ prompt, config, jsonMode, timeoutMs, systemPrompt, temperature, maxTokens });
   }
-  return callOpenAICompatible({ prompt, config, jsonMode, timeoutMs, systemPrompt });
+  return callOpenAICompatible({ prompt, config, jsonMode, timeoutMs, systemPrompt, temperature, maxTokens });
 }
 
 /** Anthropic Messages API */
-async function callAnthropic({ prompt, config, jsonMode, timeoutMs, systemPrompt }) {
+async function callAnthropic({ prompt, config, jsonMode, timeoutMs, systemPrompt, temperature, maxTokens }) {
   const baseUrl = (config.llmBaseUrl || "https://api.anthropic.com/v1").replace(/\/+$/, "");
   const model = config.llmModel || "claude-sonnet-4-6";
 
   const body = {
     model,
     messages: [{ role: "user", content: prompt }],
-    temperature: 0.1,
-    max_tokens: 2000,
+    temperature,
+    max_tokens: maxTokens,
   };
   if (systemPrompt) {
     let sys = systemPrompt;
@@ -81,7 +83,7 @@ async function callAnthropic({ prompt, config, jsonMode, timeoutMs, systemPrompt
 }
 
 /** OpenAI-compatible chat completions API (OpenAI, DashScope, etc.) */
-async function callOpenAICompatible({ prompt, config, jsonMode, timeoutMs, systemPrompt }) {
+async function callOpenAICompatible({ prompt, config, jsonMode, timeoutMs, systemPrompt, temperature, maxTokens }) {
   const baseUrl = (config.llmBaseUrl || "https://api.openai.com/v1").replace(/\/+$/, "");
   const isDashscope = baseUrl.includes("dashscope");
   const model = config.llmModel || "gpt-4o-mini";
@@ -90,7 +92,7 @@ async function callOpenAICompatible({ prompt, config, jsonMode, timeoutMs, syste
   if (systemPrompt) messages.push({ role: "system", content: systemPrompt });
   messages.push({ role: "user", content: prompt });
 
-  const body = { model, messages, temperature: 0.1, max_tokens: 2000 };
+  const body = { model, messages, temperature, max_tokens: maxTokens };
   if (jsonMode) body.response_format = { type: "json_object" };
   if (isDashscope) body.enable_thinking = false;
 

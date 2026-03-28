@@ -227,7 +227,8 @@ The "category" field MUST be one of: ${validKeys.join(", ")}, other`;
           assignments = Array.isArray(response)
             ? response
             : (response.entities || response.results || response.items || []);
-        } catch {
+        } catch (err) {
+          logger?.warn?.(`Auto-categorize LLM call failed: ${err.message}`);
           return;
         }
 
