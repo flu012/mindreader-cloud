@@ -4,9 +4,10 @@
 import neo4j from "neo4j-driver";
 import { query, readQuery, nodeToPlain } from "../neo4j.js";
 import { categorizeEntity } from "../lib/categorizer.js";
+import { reinforceEntities } from "../lib/decay.js";
 
 export function registerRoutes(app, ctx) {
-  const { driver, logger } = ctx;
+  const { driver, config, logger } = ctx;
 
   /**
    * GET /api/search?q=text&limit=10 — Search memories
@@ -21,8 +22,9 @@ export function registerRoutes(app, ctx) {
       // Search entities by name and summary
       const results = await query(driver,
         `MATCH (e:Entity)
-         WHERE toLower(e.name) CONTAINS toLower($q)
-            OR toLower(e.summary) CONTAINS toLower($q)
+         WHERE (toLower(e.name) CONTAINS toLower($q)
+            OR toLower(e.summary) CONTAINS toLower($q))
+           AND e.expired_at IS NULL
          RETURN e
          ORDER BY e.created_at DESC
          LIMIT $limit`,
@@ -39,6 +41,10 @@ export function registerRoutes(app, ctx) {
          LIMIT $limit`,
         { q, limit: neo4j.int(maxLimit) }
       );
+
+      // Reinforce accessed entities (fire-and-forget)
+      const names = (results.map(r => r.e ? nodeToPlain(r.e).name : null)).filter(Boolean);
+      if (names.length > 0) reinforceEntities(driver, names, config.memoryDecayReinforceDelta).catch(() => {});
 
       res.json({
         entities: results.map((r) => nodeToPlain(r.e)),
@@ -70,7 +76,7 @@ export function registerRoutes(app, ctx) {
 
       // Group entities by category
       const entityGroups = await query(driver,
-        `MATCH (e:Entity)
+        `MATCH (e:Entity) WHERE e.expired_at IS NULL
          RETURN e.name AS name, e.summary AS summary, COALESCE(e.category, e.group_id, '') AS category
          ORDER BY e.name`
       );
@@ -99,8 +105,8 @@ export function registerRoutes(app, ctx) {
     try {
       const results = await query(driver,
         `MATCH (e:Entity)
-         WHERE toLower(e.summary) CONTAINS 'project'
-            OR toLower(e.summary) CONTAINS 'is a project'
+         WHERE e.expired_at IS NULL AND (toLower(e.summary) CONTAINS 'project'
+            OR toLower(e.summary) CONTAINS 'is a project')
          RETURN DISTINCT e.name AS name, e.summary AS summary, e.uuid AS uuid, e.created_at AS created_at
          ORDER BY e.name`
       );
@@ -152,7 +158,7 @@ export function registerRoutes(app, ctx) {
       const allowedSorts = ["created_at", "name"];
       const safeSort = allowedSorts.includes(sort) ? sort : "created_at";
 
-      let whereClauses = [];
+      let whereClauses = ["e.expired_at IS NULL"];
       let params = {};
 
       if (q) {
@@ -219,7 +225,7 @@ export function registerRoutes(app, ctx) {
 
       const cypher = `
         MATCH (e:Entity)
-        WHERE e.created_at IS NOT NULL
+        WHERE e.created_at IS NOT NULL AND e.expired_at IS NULL
         WITH e ORDER BY e.created_at DESC
         RETURN e.uuid AS uuid, e.name AS name, e.summary AS summary,
                e.created_at AS created_at, COALESCE(e.category, e.group_id, '') AS category, e.node_type AS node_type

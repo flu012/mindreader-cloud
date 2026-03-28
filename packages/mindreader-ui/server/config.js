@@ -84,5 +84,12 @@ export function loadConfig(overrides = {}) {
     recallLimit: overrides.recallLimit || parseInt(process.env.RECALL_LIMIT) || 5,
     captureMaxChars: overrides.captureMaxChars || parseInt(process.env.CAPTURE_MAX_CHARS) || 2000,
     uiEnabled: overrides.uiEnabled ?? true,
+
+    // Memory decay
+    memoryDecayEnabled: overrides.memoryDecayEnabled ?? (process.env.MEMORY_DECAY_ENABLED !== "false"),
+    memoryDecayIntervalMs: overrides.memoryDecayIntervalMs ?? (parseInt(process.env.MEMORY_DECAY_INTERVAL_MS) || 3600000),
+    memoryDecayLambda: overrides.memoryDecayLambda ?? (parseFloat(process.env.MEMORY_DECAY_LAMBDA) || 0.03),
+    memoryDecayThreshold: overrides.memoryDecayThreshold ?? (parseFloat(process.env.MEMORY_DECAY_THRESHOLD) || 0.1),
+    memoryDecayReinforceDelta: overrides.memoryDecayReinforceDelta ?? (parseFloat(process.env.MEMORY_DECAY_REINFORCE_DELTA) || 0.3),
   };
 }
