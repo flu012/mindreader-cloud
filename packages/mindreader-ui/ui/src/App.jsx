@@ -499,7 +499,7 @@ export default function App() {
 
                   return (
                     <div style={{
-                      position: "absolute", bottom: 20, left: 60, right: 60, zIndex: 20,
+                      position: "absolute", bottom: 20, left: "25%", right: "25%", zIndex: 20,
                       background: "rgba(20,20,30,0.92)", borderRadius: 10, padding: "10px 16px 6px",
                       border: "1px solid rgba(255,255,255,0.08)", backdropFilter: "blur(8px)",
                     }}>
