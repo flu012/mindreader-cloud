@@ -179,20 +179,22 @@ export default function App() {
 
   // Date range for time slider (min created_at to now)
   const graphDateRange = useMemo(() => {
-    if (!graphData?.nodes?.length) return null;
-    const dates = graphData.nodes
+    const source = filteredData || graphData;
+    if (!source?.nodes?.length) return null;
+    const dates = source.nodes
       .map(n => n.created_at ? new Date(n.created_at).getTime() : null)
       .filter(Boolean);
     if (!dates.length) return null;
-    return { min: Math.min(...dates), max: Date.now() };
-  }, [graphData]);
+    return { min: dates.reduce((a, b) => a < b ? a : b), max: Date.now() };
+  }, [filteredData, graphData]);
 
   // Filter graph data by the time slider date
   const filteredByTimeData = useMemo(() => {
     if (!timeSliderEnabled || !timeSliderDate || !filteredData) return filteredData;
     const asOf = timeSliderDate;
     const nodes = filteredData.nodes.filter(n => {
-      const created = n.created_at ? new Date(n.created_at).getTime() : 0;
+      const created = n.created_at ? new Date(n.created_at).getTime() : null;
+      if (created === null) return true; // no timestamp — always show
       if (created > asOf) return false; // didn't exist yet
       return true; // show both alive and expired (GraphView handles visual distinction)
     });
@@ -201,8 +203,11 @@ export default function App() {
       const src = typeof l.source === 'object' ? l.source.id : l.source;
       const tgt = typeof l.target === 'object' ? l.target.id : l.target;
       if (!nodeIds.has(src) || !nodeIds.has(tgt)) return false;
-      const created = l.created_at ? new Date(l.created_at).getTime() : 0;
+      const created = l.created_at ? new Date(l.created_at).getTime() : null;
+      if (created === null) return true;
       if (created > asOf) return false;
+      const expiredAt = l.expired_at ? new Date(l.expired_at).getTime() : null;
+      if (expiredAt && expiredAt <= asOf) return false;
       return true;
     });
     // Mark nodes as ghost if they were expired by this date

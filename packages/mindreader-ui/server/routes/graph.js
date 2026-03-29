@@ -138,6 +138,7 @@ export function registerRoutes(app, ctx) {
       const depth = Math.min(Math.max(parseInt(req.query.depth) || 2, 1), 4);
       const showExpired = req.query.showExpired === "true";
       const egoEntityFilter = showExpired ? "" : "WHERE neighbor.expired_at IS NULL";
+      const relFilter = showExpired ? "" : "AND r.expired_at IS NULL";
 
       // Variable-length relationship pattern for multi-hop BFS
       const nodeRecords = await query(driver, `
@@ -174,10 +175,10 @@ export function registerRoutes(app, ctx) {
 
       const linkRecords = await query(driver, `
         MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity)
-        WHERE a.uuid IN $ids AND b.uuid IN $ids AND r.expired_at IS NULL
+        WHERE a.uuid IN $ids AND b.uuid IN $ids ${relFilter}
         RETURN a.uuid AS source, b.uuid AS target,
                r.name AS label, r.fact AS fact,
-               r.created_at AS created_at,
+               r.created_at AS created_at, r.expired_at AS expired_at,
                r.strength AS strength
       `, { ids: [...nodeIds] });
 
@@ -187,6 +188,7 @@ export function registerRoutes(app, ctx) {
         label: rec.label || "",
         fact: rec.fact || "",
         created_at: rec.created_at,
+        expired_at: rec.expired_at || null,
         strength: rec.strength ?? null,
       }));
 
