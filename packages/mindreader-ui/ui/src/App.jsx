@@ -38,6 +38,8 @@ export default function App() {
   const [showDecay, setShowDecay] = useState(false);
   const [timeSliderDate, setTimeSliderDate] = useState(null); // null = "now" (no filter)
   const [timeSliderEnabled, setTimeSliderEnabled] = useState(false);
+  const [timeAutoPlaying, setTimeAutoPlaying] = useState(false);
+  const timeAutoPlayRef = useRef(null);
   const [egoGraph, setEgoGraph] = useState(null); // { data, center } when viewing ego subgraph
   const [refreshKey, setRefreshKey] = useState(0);
   const [dynamicCategories, setDynamicCategories] = useState(null);
@@ -410,7 +412,10 @@ export default function App() {
                       onChange={(e) => {
                         setTimeSliderEnabled(e.target.checked);
                         if (e.target.checked) setShowDecay(true);
-                        if (!e.target.checked) setTimeSliderDate(null);
+                        if (!e.target.checked) {
+                          setTimeSliderDate(null);
+                          if (timeAutoPlayRef.current) { clearInterval(timeAutoPlayRef.current); timeAutoPlayRef.current = null; setTimeAutoPlaying(false); }
+                        }
                       }}
                       style={{ accentColor: "#4a9eff" }}
                     />
@@ -483,37 +488,95 @@ export default function App() {
                   <HoverTooltip node={hoveredNode} position={tooltipPos} />
                 )}
                 {/* Time Slider */}
-                {timeSliderEnabled && graphDateRange && (
-                  <div style={{
-                    position: "absolute", bottom: 20, left: 60, right: 60, zIndex: 20,
-                    background: "rgba(20,20,30,0.9)", borderRadius: 10, padding: "10px 16px",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                  }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--text-secondary)", marginBottom: 4 }}>
-                      <span>{new Date(graphDateRange.min).toLocaleDateString()}</span>
-                      <span style={{ color: "#4aff9e", fontWeight: 600 }}>
-                        {timeSliderDate ? new Date(timeSliderDate).toLocaleDateString() + " " + new Date(timeSliderDate).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "Now"}
-                      </span>
-                      <span>Now</span>
+                {timeSliderEnabled && graphDateRange && (() => {
+                  const range = graphDateRange.max - graphDateRange.min;
+                  const tickCount = 5;
+                  const ticks = Array.from({ length: tickCount }, (_, i) => {
+                    const t = graphDateRange.min + (range * i) / (tickCount - 1);
+                    const d = new Date(t);
+                    return { pos: (i / (tickCount - 1)) * 100, label: d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) };
+                  });
+
+                  return (
+                    <div style={{
+                      position: "absolute", bottom: 20, left: 60, right: 60, zIndex: 20,
+                      background: "rgba(20,20,30,0.92)", borderRadius: 10, padding: "10px 16px 6px",
+                      border: "1px solid rgba(255,255,255,0.08)", backdropFilter: "blur(8px)",
+                    }}>
+                      {/* Current date display */}
+                      <div style={{ textAlign: "center", fontSize: 13, fontWeight: 600, color: "#4aff9e", marginBottom: 6 }}>
+                        {timeSliderDate
+                          ? new Date(timeSliderDate).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" }) + " " + new Date(timeSliderDate).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                          : "Now"}
+                      </div>
+                      {/* Slider */}
+                      <input
+                        type="range"
+                        min={graphDateRange.min}
+                        max={graphDateRange.max}
+                        value={timeSliderDate || graphDateRange.max}
+                        onChange={(e) => setTimeSliderDate(Number(e.target.value))}
+                        style={{ width: "100%", accentColor: "#4aff9e", margin: 0 }}
+                      />
+                      {/* Date gauge ticks */}
+                      <div style={{ position: "relative", height: 16, marginTop: 2 }}>
+                        {ticks.map((tick, i) => (
+                          <span key={i} style={{
+                            position: "absolute", left: `${tick.pos}%`, transform: "translateX(-50%)",
+                            fontSize: 9, color: "var(--text-secondary)", whiteSpace: "nowrap",
+                          }}>
+                            {i === tickCount - 1 ? "Now" : tick.label}
+                          </span>
+                        ))}
+                      </div>
+                      {/* Controls */}
+                      <div style={{ display: "flex", justifyContent: "center", gap: 8, marginTop: 4, paddingBottom: 2 }}>
+                        <button
+                          onClick={() => {
+                            if (timeAutoPlayRef.current) {
+                              clearInterval(timeAutoPlayRef.current);
+                              timeAutoPlayRef.current = null;
+                              setTimeAutoPlaying(false);
+                            } else {
+                              const start = graphDateRange.min;
+                              const end = graphDateRange.max;
+                              const totalMs = 30000;
+                              const stepMs = 50;
+                              const steps = totalMs / stepMs;
+                              const increment = (end - start) / steps;
+                              let current = start;
+                              setTimeSliderDate(start);
+                              setTimeAutoPlaying(true);
+                              timeAutoPlayRef.current = setInterval(() => {
+                                current += increment;
+                                if (current >= end) {
+                                  clearInterval(timeAutoPlayRef.current);
+                                  timeAutoPlayRef.current = null;
+                                  setTimeSliderDate(null);
+                                  setTimeAutoPlaying(false);
+                                } else {
+                                  setTimeSliderDate(current);
+                                }
+                              }, stepMs);
+                            }
+                          }}
+                          style={{ fontSize: 10, padding: "2px 10px", background: timeAutoPlaying ? "#ff4a4a22" : "#4aff9e22", color: timeAutoPlaying ? "#ff4a4a" : "#4aff9e", border: `1px solid ${timeAutoPlaying ? "#ff4a4a44" : "#4aff9e44"}`, borderRadius: 4, cursor: "pointer" }}
+                        >
+                          {timeAutoPlaying ? "Stop" : "Auto Play"}
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (timeAutoPlayRef.current) { clearInterval(timeAutoPlayRef.current); timeAutoPlayRef.current = null; setTimeAutoPlaying(false); }
+                            setTimeSliderDate(null);
+                          }}
+                          style={{ fontSize: 10, padding: "2px 10px", background: "rgba(255,255,255,0.06)", color: "var(--text-secondary)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, cursor: "pointer" }}
+                        >
+                          Reset
+                        </button>
+                      </div>
                     </div>
-                    <input
-                      type="range"
-                      min={graphDateRange.min}
-                      max={Date.now()}
-                      value={timeSliderDate || Date.now()}
-                      onChange={(e) => setTimeSliderDate(Number(e.target.value))}
-                      style={{ width: "100%", accentColor: "#4aff9e" }}
-                    />
-                    <div style={{ display: "flex", justifyContent: "center", gap: 12, marginTop: 6 }}>
-                      <button
-                        onClick={() => setTimeSliderDate(null)}
-                        style={{ fontSize: 10, padding: "2px 8px", background: "rgba(255,255,255,0.06)", color: "var(--text-secondary)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, cursor: "pointer" }}
-                      >
-                        Reset to Now
-                      </button>
-                    </div>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
             )}
 
