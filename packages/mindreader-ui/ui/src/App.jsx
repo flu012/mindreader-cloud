@@ -125,7 +125,9 @@ export default function App() {
   const handleNodeClick = useCallback(async (node) => {
     setSelectedNode(node);
     try {
-      const res = await fetch(`/api/entity/${encodeURIComponent(node.name)}`);
+      // Use uuid if available for precise lookup (handles duplicate names)
+      const identifier = node.id || node.name;
+      const res = await fetch(`/api/entity/${encodeURIComponent(identifier)}`);
       if (res.ok) setEntityDetail(await res.json());
     } catch (err) {
       console.error("Failed to load entity:", err);

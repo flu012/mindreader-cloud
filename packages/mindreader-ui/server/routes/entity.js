@@ -15,12 +15,14 @@ export function registerRoutes(app, ctx) {
   app.get("/api/entity/:name", async (req, res) => {
     try {
       const { name } = req.params;
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(name);
+      const matchClause = isUuid
+        ? "WHERE e.uuid = $name"
+        : "WHERE toLower(e.name) = toLower($name)";
 
       // Get entity
       const entities = await query(driver,
-        `MATCH (e:Entity)
-         WHERE toLower(e.name) = toLower($name)
-         RETURN e LIMIT 1`,
+        `MATCH (e:Entity) ${matchClause} RETURN e LIMIT 1`,
         { name }
       );
 
@@ -30,14 +32,15 @@ export function registerRoutes(app, ctx) {
 
       const entity = entities[0].e ? nodeToPlain(entities[0].e) : entities[0];
 
-      // Get relationships
+      // Get relationships (always match by uuid for precision if we have it)
+      const entityUuid = entity.uuid || name;
       const rels = await query(driver,
         `MATCH (e:Entity)-[r:RELATES_TO]-(other:Entity)
-         WHERE toLower(e.name) = toLower($name) AND r.expired_at IS NULL
+         WHERE e.uuid = $uuid AND r.expired_at IS NULL
          RETURN r, other,
                 CASE WHEN startNode(r) = e THEN 'outgoing' ELSE 'incoming' END AS direction
          LIMIT 50`,
-        { name }
+        { uuid: entityUuid }
       );
 
       const relationships = rels.map((rec) => {
