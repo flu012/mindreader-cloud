@@ -36,6 +36,8 @@ export default function App() {
   const [hiddenTypes, setHiddenTypes] = useState(new Set());
   const [graphLayout, setGraphLayout] = useState("force");
   const [showDecay, setShowDecay] = useState(false);
+  const [timeSliderDate, setTimeSliderDate] = useState(null); // null = "now" (no filter)
+  const [timeSliderEnabled, setTimeSliderEnabled] = useState(false);
   const [egoGraph, setEgoGraph] = useState(null); // { data, center } when viewing ego subgraph
   const [refreshKey, setRefreshKey] = useState(0);
   const [dynamicCategories, setDynamicCategories] = useState(null);
@@ -174,6 +176,43 @@ export default function App() {
     });
     return { nodes, links };
   }, [graphData, hiddenTypes, egoGraph]);
+
+  // Date range for time slider (min created_at to now)
+  const graphDateRange = useMemo(() => {
+    if (!graphData?.nodes?.length) return null;
+    const dates = graphData.nodes
+      .map(n => n.created_at ? new Date(n.created_at).getTime() : null)
+      .filter(Boolean);
+    if (!dates.length) return null;
+    return { min: Math.min(...dates), max: Date.now() };
+  }, [graphData]);
+
+  // Filter graph data by the time slider date
+  const filteredByTimeData = useMemo(() => {
+    if (!timeSliderEnabled || !timeSliderDate || !filteredData) return filteredData;
+    const asOf = timeSliderDate;
+    const nodes = filteredData.nodes.filter(n => {
+      const created = n.created_at ? new Date(n.created_at).getTime() : 0;
+      if (created > asOf) return false; // didn't exist yet
+      return true; // show both alive and expired (GraphView handles visual distinction)
+    });
+    const nodeIds = new Set(nodes.map(n => n.id));
+    const links = filteredData.links.filter(l => {
+      const src = typeof l.source === 'object' ? l.source.id : l.source;
+      const tgt = typeof l.target === 'object' ? l.target.id : l.target;
+      if (!nodeIds.has(src) || !nodeIds.has(tgt)) return false;
+      const created = l.created_at ? new Date(l.created_at).getTime() : 0;
+      if (created > asOf) return false;
+      return true;
+    });
+    // Mark nodes as ghost if they were expired by this date
+    const nodesWithGhostState = nodes.map(n => {
+      const expiredAt = n.expired_at ? new Date(n.expired_at).getTime() : null;
+      const isGhostAtDate = expiredAt && expiredAt <= asOf;
+      return isGhostAtDate ? { ...n, expired_at: n.expired_at, strength: 0 } : n;
+    });
+    return { nodes: nodesWithGhostState, links };
+  }, [filteredData, timeSliderEnabled, timeSliderDate]);
 
   const navigateToEntity = useCallback(
     (name) => {
@@ -343,11 +382,12 @@ export default function App() {
                     </div>
                   ))}
                 </div>
-                {/* Decay mode toggle */}
+                {/* Decay mode toggle + Time Travel toggle */}
                 <div style={{
                   position: "absolute", top: 10, right: 10, zIndex: 20,
                   background: "rgba(20,20,30,0.85)", borderRadius: 8, padding: "6px 12px",
                   border: "1px solid rgba(255,255,255,0.08)",
+                  display: "flex", flexDirection: "column", gap: 4,
                 }}>
                   <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: "var(--text-secondary)" }}>
                     <input
@@ -357,6 +397,19 @@ export default function App() {
                       style={{ accentColor: "#4aff9e" }}
                     />
                     Show Decay
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: "var(--text-secondary)" }}>
+                    <input
+                      type="checkbox"
+                      checked={timeSliderEnabled}
+                      onChange={(e) => {
+                        setTimeSliderEnabled(e.target.checked);
+                        if (e.target.checked) setShowDecay(true);
+                        if (!e.target.checked) setTimeSliderDate(null);
+                      }}
+                      style={{ accentColor: "#4a9eff" }}
+                    />
+                    Time Travel
                   </label>
                 </div>
                 {/* Categories filter */}
@@ -411,7 +464,7 @@ export default function App() {
                 </div>
                 <GraphView
                   ref={graphRef}
-                  data={filteredData}
+                  data={filteredByTimeData}
                   colors={catColors}
                   onNodeClick={handleNodeClick}
                   onNodeHover={handleNodeHover}
@@ -423,6 +476,38 @@ export default function App() {
                 />
                 {hoveredNode && !selectedNode && (
                   <HoverTooltip node={hoveredNode} position={tooltipPos} />
+                )}
+                {/* Time Slider */}
+                {timeSliderEnabled && graphDateRange && (
+                  <div style={{
+                    position: "absolute", bottom: 20, left: 60, right: 60, zIndex: 20,
+                    background: "rgba(20,20,30,0.9)", borderRadius: 10, padding: "10px 16px",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "var(--text-secondary)", marginBottom: 4 }}>
+                      <span>{new Date(graphDateRange.min).toLocaleDateString()}</span>
+                      <span style={{ color: "#4aff9e", fontWeight: 600 }}>
+                        {timeSliderDate ? new Date(timeSliderDate).toLocaleDateString() + " " + new Date(timeSliderDate).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "Now"}
+                      </span>
+                      <span>Now</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={graphDateRange.min}
+                      max={Date.now()}
+                      value={timeSliderDate || Date.now()}
+                      onChange={(e) => setTimeSliderDate(Number(e.target.value))}
+                      style={{ width: "100%", accentColor: "#4aff9e" }}
+                    />
+                    <div style={{ display: "flex", justifyContent: "center", gap: 12, marginTop: 6 }}>
+                      <button
+                        onClick={() => setTimeSliderDate(null)}
+                        style={{ fontSize: 10, padding: "2px 8px", background: "rgba(255,255,255,0.06)", color: "var(--text-secondary)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4, cursor: "pointer" }}
+                      >
+                        Reset to Now
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             )}

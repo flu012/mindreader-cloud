@@ -18,6 +18,7 @@ export function registerRoutes(app, ctx) {
       const showExpired = req.query.showExpired === "true";
       const maxLimit = Math.min(parseInt(limit) || 500, 2000);
       const entityFilter = showExpired ? "" : "AND n.expired_at IS NULL";
+      const relFilter = showExpired ? "" : "AND r.expired_at IS NULL";
 
       let nodeCypher, linkCypher;
 
@@ -42,11 +43,11 @@ export function registerRoutes(app, ctx) {
              OR toLower(a.summary) CONTAINS toLower($project)
              OR toLower(b.name) CONTAINS toLower($project)
              OR toLower(b.summary) CONTAINS toLower($project))
-            AND r.expired_at IS NULL
+            ${relFilter}
           RETURN a.uuid AS source, b.uuid AS target,
                  r.name AS label, r.fact AS fact,
                  r.created_at AS created_at, r.valid_at AS valid_at,
-                 r.strength AS strength
+                 r.expired_at AS expired_at, r.strength AS strength
           LIMIT $limit
         `;
       } else {
@@ -64,11 +65,11 @@ export function registerRoutes(app, ctx) {
 
         linkCypher = `
           MATCH (a:Entity)-[r:RELATES_TO]->(b:Entity)
-          WHERE r.expired_at IS NULL
+          WHERE 1=1 ${relFilter}
           RETURN a.uuid AS source, b.uuid AS target,
                  r.name AS label, r.fact AS fact,
                  r.created_at AS created_at, r.valid_at AS valid_at,
-                 r.strength AS strength
+                 r.expired_at AS expired_at, r.strength AS strength
           LIMIT $limit
         `;
       }
@@ -90,6 +91,7 @@ export function registerRoutes(app, ctx) {
           tags: Array.isArray(n.tags) ? n.tags : [],
           node_type: n.node_type || "normal",
           created_at: n.created_at,
+          expired_at: n.expired_at || null,
           strength: n.strength ?? null,
         };
       });
@@ -116,6 +118,7 @@ export function registerRoutes(app, ctx) {
           label: rec.label || "",
           fact: rec.fact || "",
           created_at: rec.created_at,
+          expired_at: rec.expired_at || null,
         }));
 
       res.json({ nodes, links });
@@ -162,6 +165,7 @@ export function registerRoutes(app, ctx) {
           tags: Array.isArray(n.tags) ? n.tags : [],
           node_type: n.node_type || "normal",
           created_at: n.created_at,
+          expired_at: n.expired_at || null,
           strength: n.strength ?? null,
         };
       });
