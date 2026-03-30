@@ -25,7 +25,7 @@
       "llmProvider": {
         "type": "string",
         "description": "LLM provider: openai, anthropic, or dashscope",
-        "enum": ["openai", "anthropic", "dashscope"],
+        "enum": ["openai", "anthropic", "dashscope", "ollama"],
         "default": "openai"
       },
       "llmApiKey": {
