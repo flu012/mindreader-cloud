@@ -4,6 +4,7 @@
  */
 import { config as dotenvConfig } from "dotenv";
 import { readFileSync, existsSync } from "node:fs";
+import { homedir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -74,7 +75,7 @@ export function loadConfig(overrides = {}) {
     embedderApiKey: overrides.embedderApiKey || process.env.EMBEDDER_API_KEY || process.env.LLM_API_KEY || "",
     embedderModel: overrides.embedderModel || process.env.EMBEDDER_MODEL || embedderPreset.defaultModel || "text-embedding-3-small",
     uiPort: overrides.uiPort || parseInt(process.env.UI_PORT) || 18900,
-    cachePath: overrides.cachePath || process.env.MINDREADER_CACHE || path.join(process.env.HOME || "~", ".mindreader", "cache"),
+    cachePath: overrides.cachePath || process.env.MINDREADER_CACHE || path.join(process.env.HOME || process.env.USERPROFILE || homedir(), ".mindreader", "cache"),
     pythonPath: overrides.pythonPath || process.env.MINDGRAPH_PYTHON_PATH || defaultPythonPath,
     apiToken: overrides.apiToken || process.env.API_TOKEN || "",
     seqUrl: overrides.seqUrl || process.env.SEQ_URL || "",
