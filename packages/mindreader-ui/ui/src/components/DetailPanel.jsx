@@ -215,7 +215,7 @@ export default function DetailPanel({ entity, relationships, onClose, onNavigate
         <DeletePanel entityName={entity.name} onDone={() => { setActiveAction(null); if (onDeleteNode) onDeleteNode(entity.name); onClose(); }} onCancel={() => setActiveAction(null)} />
       )}
       {activeAction && activeAction !== "delete" && (
-        <ActionPanel mode={activeAction} entityName={entity.name} onDone={(result) => { setActiveAction(null); if (onRefresh) onRefresh(); if (result?.kept && onNavigate) onNavigate(result.kept); }} onCancel={() => setActiveAction(null)} />
+        <ActionPanel mode={activeAction} entityName={entity.name} entityUuid={entity.uuid} onDone={(result) => { setActiveAction(null); if (onRefresh) onRefresh(); if (result?.kept && onNavigate) onNavigate(result.kept); }} onCancel={() => setActiveAction(null)} />
       )}
 
       {/* === Memory Strength === */}
@@ -991,7 +991,7 @@ function NodeTypeSelector({ entityName, currentNodeType, onRefresh }) {
   );
 }
 
-function ActionPanel({ mode, entityName, onDone, onCancel }) {
+function ActionPanel({ mode, entityName, entityUuid, onDone, onCancel }) {
   const [search, setSearch] = useState("");
   const [results, setResults] = useState([]);
   const [target, setTarget] = useState(null);
@@ -1012,7 +1012,7 @@ function ActionPanel({ mode, entityName, onDone, onCancel }) {
         const res = await fetch(`/api/entities?q=${encodeURIComponent(search)}&limit=8`);
         if (res.ok) {
           const data = await res.json();
-          setResults((data.entities || []).filter(e => e.name !== entityName));
+          setResults((data.entities || []).filter(e => entityUuid ? e.uuid !== entityUuid : e.name !== entityName));
         }
       } catch { setResults([]); }
     }, 200);
@@ -1021,7 +1021,8 @@ function ActionPanel({ mode, entityName, onDone, onCancel }) {
 
   const selectTarget = useCallback(async (entity) => {
     try {
-      const res = await fetch(`/api/entity/${encodeURIComponent(entity.name)}`);
+      const identifier = entity.uuid || entity.name;
+      const res = await fetch(`/api/entity/${encodeURIComponent(identifier)}`);
       if (res.ok) {
         const data = await res.json();
         setTarget(data);
@@ -1119,9 +1120,12 @@ function ActionPanel({ mode, entityName, onDone, onCancel }) {
                 onMouseEnter={(ev) => ev.currentTarget.style.background = `${accent}15`}
                 onMouseLeave={(ev) => ev.currentTarget.style.background = "transparent"}
                 >
-                  <div>{e.name}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {e.name}
+                    {e.category && <span style={{ fontSize: 9, color: "var(--text-secondary)", background: "rgba(255,255,255,0.06)", padding: "1px 5px", borderRadius: 4 }}>{e.category}</span>}
+                  </div>
                   {e.summary && <div style={{ fontSize: 11, color: "var(--text-secondary)", marginTop: 2 }}>
-                    {e.summary.slice(0, 60)}
+                    {e.summary.slice(0, 80)}
                   </div>}
                 </div>
               ))}
