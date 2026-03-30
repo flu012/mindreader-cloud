@@ -1046,21 +1046,27 @@ function ActionPanel({ mode, entityName, entityUuid, onDone, onCancel }) {
           body: JSON.stringify({
             sourceName: entityName,
             targetName: target.entity.name,
+            sourceUuid: entityUuid || undefined,
+            targetUuid: target.entity.uuid || undefined,
             relationName: relationName.toUpperCase().replace(/\s+/g, "_"),
             fact: fact || undefined,
           }),
         });
         if (!res.ok) throw new Error((await res.json()).error || "Link failed");
-        onDone({ kept: entityName });
+        onDone({ kept: entityUuid || entityName });
       } else {
         const keep = keepName === "current" ? entityName : target.entity.name;
         const merge = keepName === "current" ? target.entity.name : entityName;
+        const keepU = keepName === "current" ? entityUuid : target.entity.uuid;
+        const mergeU = keepName === "current" ? target.entity.uuid : entityUuid;
         const res = await fetch("/api/merge", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             keepName: keep,
             mergeName: merge,
+            keepUuid: keepU || undefined,
+            mergeUuid: mergeU || undefined,
             newSummary: summary || undefined,
           }),
         });

@@ -224,20 +224,29 @@ Write a 200-word summary:`;
    */
   app.post("/api/merge", async (req, res) => {
     try {
-      const { keepName, mergeName, newSummary, newGroup } = req.body;
+      const { keepName, mergeName, keepUuid, mergeUuid, newSummary, newGroup } = req.body;
       if (!keepName || !mergeName) return res.status(400).json({ error: "Missing keepName or mergeName" });
-      if (keepName === mergeName) return res.status(400).json({ error: "Cannot merge entity with itself" });
+      // Compare by uuid if available, otherwise by name
+      if (keepUuid && mergeUuid) {
+        if (keepUuid === mergeUuid) return res.status(400).json({ error: "Cannot merge entity with itself" });
+      } else {
+        if (keepName === mergeName) return res.status(400).json({ error: "Cannot merge entity with itself" });
+      }
 
-      // Transfer all RELATES_TO relationships from mergeName to keepName
+      // Use uuid-based matching when available for precision with duplicate names
+      const keepMatch = keepUuid ? "e.uuid = $keepUuid" : "e.name = $keepName";
+      const mergeMatch = mergeUuid ? "e.uuid = $mergeUuid" : "e.name = $mergeName";
+
+      // Transfer all RELATES_TO relationships from merge entity to keep entity
       const transferred = await query(driver,
-        `MATCH (src:Entity {name: $mergeName})-[r:RELATES_TO]-(other:Entity)
-         WHERE other.name <> $keepName
+        `MATCH (src:Entity WHERE ${mergeMatch})-[r:RELATES_TO]-(other:Entity)
+         WHERE other.uuid <> coalesce($keepUuid, '') AND other.name <> $keepName
          WITH src, r, other,
               CASE WHEN startNode(r) = src THEN 'out' ELSE 'in' END AS dir,
               r.name AS relName, r.fact AS fact, r.created_at AS created,
               r.valid_at AS valid, r.expired_at AS expired, r.uuid AS uuid
          RETURN dir, relName, fact, other.name AS otherName, created, valid, expired, uuid`,
-        { keepName, mergeName }
+        { keepName, mergeName, keepUuid: keepUuid || "", mergeUuid: mergeUuid || "" }
       );
 
       let count = 0;
@@ -245,15 +254,15 @@ Write a 200-word summary:`;
         const newFact = (t.fact || "").replace(new RegExp(mergeName, "gi"), keepName);
         if (t.dir === "out") {
           await query(driver,
-            `MATCH (k:Entity {name: $keepName}), (o:Entity {name: $otherName})
+            `MATCH (k:Entity WHERE ${keepMatch}), (o:Entity {name: $otherName})
              CREATE (k)-[:RELATES_TO {name: $relName, fact: $fact, created_at: datetime(), uuid: randomUUID(), group_id: "", episodes: [], strength: 1.0, last_accessed_at: datetime()}]->(o)`,
-            { keepName, otherName: t.otherName, relName: t.relName, fact: newFact }
+            { keepName, keepUuid: keepUuid || "", otherName: t.otherName, relName: t.relName, fact: newFact }
           );
         } else {
           await query(driver,
-            `MATCH (o:Entity {name: $otherName}), (k:Entity {name: $keepName})
+            `MATCH (o:Entity {name: $otherName}), (k:Entity WHERE ${keepMatch})
              CREATE (o)-[:RELATES_TO {name: $relName, fact: $fact, created_at: datetime(), uuid: randomUUID(), group_id: "", episodes: [], strength: 1.0, last_accessed_at: datetime()}]->(k)`,
-            { keepName, otherName: t.otherName, relName: t.relName, fact: newFact }
+            { keepName, keepUuid: keepUuid || "", otherName: t.otherName, relName: t.relName, fact: newFact }
           );
         }
         count++;
@@ -262,16 +271,16 @@ Write a 200-word summary:`;
       // Update summary/group if provided
       if (newSummary !== undefined || newGroup) {
         const sets = [];
-        const params = { keepName };
+        const params = { keepName, keepUuid: keepUuid || "" };
         if (newSummary !== undefined) { sets.push("e.summary = $summary"); params.summary = newSummary; }
         if (newGroup) { sets.push("e.category = $category"); params.category = newGroup; }
         if (sets.length > 0) {
-          await query(driver, `MATCH (e:Entity {name: $keepName}) SET ${sets.join(", ")}`, params);
+          await query(driver, `MATCH (e:Entity WHERE ${keepMatch}) SET ${sets.join(", ")}`, params);
         }
       }
 
       // Delete merged entity
-      await query(driver, `MATCH (e:Entity {name: $mergeName}) DETACH DELETE e`, { mergeName });
+      await query(driver, `MATCH (e:Entity WHERE ${mergeMatch}) DETACH DELETE e`, { mergeName, mergeUuid: mergeUuid || "" });
 
       logger?.info?.(`MindReader: merged "${mergeName}" into "${keepName}" (${count} rels transferred)`);
       res.json({ ok: true, kept: keepName, deleted: mergeName, transferred: count });
@@ -286,30 +295,33 @@ Write a 200-word summary:`;
    */
   app.post("/api/link", async (req, res) => {
     try {
-      const { sourceName, targetName, relationName, fact } = req.body;
+      const { sourceName, targetName, sourceUuid, targetUuid, relationName, fact } = req.body;
       if (!sourceName || !targetName || !relationName) {
         return res.status(400).json({ error: "Missing sourceName, targetName, or relationName" });
       }
 
+      const sourceMatch = sourceUuid ? "s.uuid = $sourceUuid" : "s.name = $sourceName";
+      const targetMatch = targetUuid ? "t.uuid = $targetUuid" : "t.name = $targetName";
+
       // Verify both entities exist before creating the link
       const entities = await query(driver,
-        `MATCH (s:Entity {name: $sourceName}), (t:Entity {name: $targetName})
+        `MATCH (s:Entity WHERE ${sourceMatch}), (t:Entity WHERE ${targetMatch})
          RETURN s.name AS sName, t.name AS tName`,
-        { sourceName, targetName }
+        { sourceName, targetName, sourceUuid: sourceUuid || "", targetUuid: targetUuid || "" }
       );
       if (!entities.length) {
         return res.status(404).json({ error: "One or both entities not found" });
       }
 
       await query(driver,
-        `MATCH (s:Entity {name: $sourceName}), (t:Entity {name: $targetName})
+        `MATCH (s:Entity WHERE ${sourceMatch}), (t:Entity WHERE ${targetMatch})
          CREATE (s)-[:RELATES_TO {
            name: $relationName, fact: $fact,
            created_at: datetime(), uuid: randomUUID(),
            group_id: "", episodes: [],
            strength: 1.0, last_accessed_at: datetime()
          }]->(t)`,
-        { sourceName, targetName, relationName, fact: fact || `${sourceName} ${relationName} ${targetName}` }
+        { sourceName, targetName, sourceUuid: sourceUuid || "", targetUuid: targetUuid || "", relationName, fact: fact || `${sourceName} ${relationName} ${targetName}` }
       );
 
       logger?.info?.(`MindReader: linked "${sourceName}" -[${relationName}]-> "${targetName}"`);
