@@ -12,3 +12,8 @@ __pycache__/
 docs/superpowers/
 docs/test-results.md
 docs/images/self-evolving-upload.mp4
+bin/
+obj/
+.vs/
+*.user
+appsettings.Development.json
