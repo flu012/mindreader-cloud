@@ -1,8 +1,8 @@
-FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS base
+FROM mcr.microsoft.com/dotnet/aspnet:10.0-preview AS base
 WORKDIR /app
 EXPOSE 5000
 
-FROM mcr.microsoft.com/dotnet/sdk:8.0 AS build
+FROM mcr.microsoft.com/dotnet/sdk:10.0-preview AS build
 WORKDIR /src
 COPY ["src/MindReader.Cloud.API/MindReader.Cloud.API.csproj", "src/MindReader.Cloud.API/"]
 COPY ["src/MindReader.Cloud.Application/MindReader.Cloud.Application.csproj", "src/MindReader.Cloud.Application/"]

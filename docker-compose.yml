@@ -7,7 +7,7 @@ services:
       - ACCEPT_EULA=Y
       - MSSQL_SA_PASSWORD=MindReader@2026!
     ports:
-      - "1433:1433"
+      - "1434:1433"
     volumes:
       - sqlserver-data:/var/opt/mssql
     networks:
@@ -16,16 +16,15 @@ services:
       test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "MindReader@2026!" -Q "SELECT 1" -C || exit 1
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
 
   neo4j:
     image: neo4j:5-community
     environment:
       - NEO4J_AUTH=neo4j/mindreader2026
-      - NEO4J_PLUGINS=["apoc"]
     ports:
-      - "7474:7474"
-      - "7687:7687"
+      - "7475:7474"
+      - "7688:7687"
     volumes:
       - neo4j-data:/data
     networks:
@@ -55,22 +54,21 @@ services:
       - UI_PORT=18900
       - INTERNAL_SECRET=mindreader-cloud-internal-secret-2026
     volumes:
-      - ./mindreaderv2:/app
+      - ${MINDREADER_PATH:-/mnt/e/project/mindreaderv2}:/app
     networks:
       - internal
     depends_on:
       neo4j:
         condition: service_healthy
-    # NOT exposed to host — only accessible within internal network
 
   cloud-api:
     build:
       context: .
       dockerfile: src/MindReader.Cloud.API/Dockerfile
     ports:
-      - "5000:5000"
+      - "5050:5000"
     environment:
-      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_ENVIRONMENT=Development
       - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=MindReaderCloud;User Id=sa;Password=MindReader@2026!;TrustServerCertificate=True
       - Jwt__Key=MindReaderCloud-SuperSecret-JWT-Key-2026-Must-Be-At-Least-32-Chars!
       - Jwt__Issuer=MindReaderCloud
