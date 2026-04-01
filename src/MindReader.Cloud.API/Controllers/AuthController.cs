@@ -64,11 +64,15 @@ public class AuthController : ApiControllerBase
     [Authorize]
     public IActionResult Me([FromServices] ITenantService tenantService)
     {
+        var email = User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? "";
+        var name = User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? "";
         return Ok(new
         {
             UserId = tenantService.CurrentUserId,
             TenantId = tenantService.CurrentTenantId,
-            Tier = tenantService.CurrentTier
+            Tier = tenantService.CurrentTier,
+            Email = email,
+            Name = name
         });
     }
 }

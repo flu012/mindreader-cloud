@@ -24,5 +24,5 @@ export const authApi = {
   refresh: (refreshToken: string) =>
     api.post<AuthResponse>('/auth/refresh', { refreshToken }),
 
-  me: () => api.get<{ userId: number; tenantId: string; tier: string }>('/auth/me'),
+  me: () => api.get<{ userId: number; tenantId: string; tier: string; email: string; name: string }>('/auth/me'),
 };

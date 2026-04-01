@@ -22,7 +22,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const token = api.getToken();
     if (token) {
       authApi.me()
-        .then(data => setUser({ id: data.userId, email: '', name: '', tenantId: data.tenantId, tier: data.tier }))
+        .then(data => setUser({ id: data.userId, email: data.email || '', name: data.name || '', tenantId: data.tenantId, tier: data.tier }))
         .catch(() => { api.setToken(null); })
         .finally(() => setLoading(false));
     } else {
