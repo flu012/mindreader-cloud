@@ -2,6 +2,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
+import GraphApp from '../components/GraphApp';
 
 export default function Dashboard() {
   const { user, logout } = useAuth();
@@ -15,12 +16,10 @@ export default function Dashboard() {
 
   if (!user) return null;
 
-  const graphUrl = `${import.meta.env.VITE_GRAPH_URL || 'http://localhost:18900'}`;
-
   return (
     <div style={{ minHeight: '100vh', background: '#0a0a14', color: '#e0e0e8' }}>
       {/* Top bar */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 24px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 24px', borderBottom: '1px solid rgba(255,255,255,0.06)', flexShrink: 0, zIndex: 200, position: 'relative' }}>
         <h1 style={{ fontSize: 18, fontWeight: 700 }}>
           <span style={{ background: 'linear-gradient(135deg, #4aff9e, #4a9eff)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>MindReader</span>
           <span style={{ color: '#666', fontWeight: 400 }}> Cloud</span>
@@ -38,12 +37,10 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Graph iframe */}
-      <iframe
-        src={graphUrl}
-        style={{ width: '100%', height: 'calc(100vh - 52px)', border: 'none' }}
-        title="MindReader Graph"
-      />
+      {/* Embedded MindReader UI */}
+      <div style={{ height: 'calc(100vh - 52px)', overflow: 'hidden' }}>
+        <GraphApp />
+      </div>
     </div>
   );
 }
