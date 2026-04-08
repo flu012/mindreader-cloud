@@ -1,0 +1,60 @@
+version: '3.8'
+
+# Production deployment on 192.168.3.42
+# Neo4j: existing container 'mindreader-cloud-neo4j' on host ports 7474/7687
+# SQL Server: existing instance on host port 1433
+
+services:
+  mindreader-express:
+    image: ghcr.io/flu012/mindreader-express:latest
+    container_name: mindreader-cloud-express
+    restart: unless-stopped
+    environment:
+      - NEO4J_URI=bolt://host.docker.internal:7687
+      - NEO4J_USER=${NEO4J_USER:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:?required}
+      - LLM_PROVIDER=${LLM_PROVIDER:-dashscope}
+      - LLM_API_KEY=${LLM_API_KEY:?required}
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      - LLM_MODEL=${LLM_MODEL:-qwen3.5-plus}
+      - EMBEDDER_API_KEY=${EMBEDDER_API_KEY:-${LLM_API_KEY}}
+      - EMBEDDER_BASE_URL=${EMBEDDER_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
+      - EMBEDDER_MODEL=${EMBEDDER_MODEL:-text-embedding-v4}
+      - EMBEDDER_DIM=${EMBEDDER_DIM:-1024}
+      - INTERNAL_SECRET=${INTERNAL_SECRET:?required}
+      - UI_PORT=18900
+    networks:
+      - internal
+
+  cloud-api:
+    image: ghcr.io/flu012/mindreader-cloud-api:latest
+    container_name: mindreader-cloud-api
+    restart: unless-stopped
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ConnectionStrings__DefaultConnection=Server=host.docker.internal;Database=MindReaderCloud;User Id=${SQL_USER:-sa};Password=${SQL_PASSWORD:?required};TrustServerCertificate=True
+      - Jwt__Key=${JWT_KEY:?required}
+      - Jwt__Issuer=MindReaderCloud
+      - Jwt__Audience=MindReaderCloudApp
+      - MindReader__ExpressUrl=http://mindreader-express:18900
+      - MindReader__InternalSecret=${INTERNAL_SECRET:?required}
+      - AllowedOrigins__0=http://localhost:8091
+      - AllowedOrigins__1=https://mindreader.littlelittle.co.nz
+    depends_on:
+      - mindreader-express
+    networks:
+      - internal
+
+  cloud-ui:
+    image: ghcr.io/flu012/mindreader-cloud-ui:latest
+    container_name: mindreader-cloud-ui
+    restart: unless-stopped
+    ports:
+      - "8091:80"
+    depends_on:
+      - cloud-api
+    networks:
+      - internal
+
+networks:
+  internal:
