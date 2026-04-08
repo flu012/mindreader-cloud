@@ -8,6 +8,7 @@ export default function Dashboard() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [usage, setUsage] = useState<any>(null);
+  const [fetchPatched, setFetchPatched] = useState(false);
 
   useEffect(() => {
     if (!user) { navigate('/login'); return; }
@@ -15,6 +16,7 @@ export default function Dashboard() {
   }, [user, navigate]);
 
   // Inject auth header into all /api/* fetch calls (for MindReader graph components)
+  // Must complete BEFORE GraphApp renders, so we gate rendering on fetchPatched
   useEffect(() => {
     const originalFetch = window.fetch;
     window.fetch = async (input: RequestInfo | URL, init: RequestInit = {}) => {
@@ -31,10 +33,11 @@ export default function Dashboard() {
       }
       return originalFetch(input, init);
     };
+    setFetchPatched(true);
     return () => { window.fetch = originalFetch; };
   }, []);
 
-  if (!user) return null;
+  if (!user || !fetchPatched) return null;
 
   return (
     <div style={{ minHeight: '100vh', background: '#0a0a14', color: '#e0e0e8' }}>
