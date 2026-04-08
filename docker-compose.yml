@@ -1,48 +1,18 @@
 version: '3.8'
 
+# External services (on the host server):
+#   - Neo4j:     bolt://${NEO4J_HOST}:7687
+#   - SQL Server: ${SQL_HOST},1433
+
 services:
-  sqlserver:
-    image: mcr.microsoft.com/mssql/server:2022-latest
-    environment:
-      - ACCEPT_EULA=Y
-      - MSSQL_SA_PASSWORD=MindReader@2026!
-    ports:
-      - "1434:1433"
-    volumes:
-      - sqlserver-data:/var/opt/mssql
-    networks:
-      - internal
-    healthcheck:
-      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "MindReader@2026!" -Q "SELECT 1" -C || exit 1
-      interval: 10s
-      timeout: 5s
-      retries: 10
-
-  neo4j:
-    image: neo4j:5-community
-    environment:
-      - NEO4J_AUTH=neo4j/mindreader2026
-    ports:
-      - "7475:7474"
-      - "7688:7687"
-    volumes:
-      - neo4j-data:/data
-    networks:
-      - internal
-    healthcheck:
-      test: wget -qO- http://localhost:7474 || exit 1
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   mindreader-express:
     image: node:22-slim
     working_dir: /app
     command: sh -c "npm install --silent && npm start"
     environment:
-      - NEO4J_URI=bolt://neo4j:7687
-      - NEO4J_USER=neo4j
-      - NEO4J_PASSWORD=mindreader2026
+      - NEO4J_URI=bolt://${NEO4J_HOST:?required}:7687
+      - NEO4J_USER=${NEO4J_USER:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:?required}
       - LLM_PROVIDER=${LLM_PROVIDER:-openai}
       - LLM_API_KEY=${LLM_API_KEY}
       - LLM_BASE_URL=${LLM_BASE_URL:-https://api.openai.com/v1}
@@ -52,14 +22,11 @@ services:
       - EMBEDDER_MODEL=${EMBEDDER_MODEL:-text-embedding-3-small}
       - EMBEDDER_DIM=${EMBEDDER_DIM:-1536}
       - UI_PORT=18900
-      - INTERNAL_SECRET=mindreader-cloud-internal-secret-2026
+      - INTERNAL_SECRET=${INTERNAL_SECRET:?required}
     volumes:
       - ${MINDREADER_PATH:-/mnt/e/project/mindreaderv2}:/app
     networks:
       - internal
-    depends_on:
-      neo4j:
-        condition: service_healthy
 
   cloud-api:
     build:
@@ -68,19 +35,17 @@ services:
     ports:
       - "5050:5000"
     environment:
-      - ASPNETCORE_ENVIRONMENT=Development
-      - ConnectionStrings__DefaultConnection=Server=sqlserver;Database=MindReaderCloud;User Id=sa;Password=MindReader@2026!;TrustServerCertificate=True
-      - Jwt__Key=MindReaderCloud-SuperSecret-JWT-Key-2026-Must-Be-At-Least-32-Chars!
+      - ASPNETCORE_ENVIRONMENT=${ASPNETCORE_ENVIRONMENT:-Production}
+      - ConnectionStrings__DefaultConnection=Server=${SQL_HOST:?required};Database=MindReaderCloud;User Id=${SQL_USER:-sa};Password=${SQL_PASSWORD:?required};TrustServerCertificate=True
+      - Jwt__Key=${JWT_KEY:?required}
       - Jwt__Issuer=MindReaderCloud
       - Jwt__Audience=MindReaderCloudApp
       - MindReader__ExpressUrl=http://mindreader-express:18900
-      - MindReader__InternalSecret=mindreader-cloud-internal-secret-2026
+      - MindReader__InternalSecret=${INTERNAL_SECRET:?required}
     networks:
       - internal
       - public
     depends_on:
-      sqlserver:
-        condition: service_healthy
       mindreader-express:
         condition: service_started
 
@@ -88,7 +53,3 @@ networks:
   internal:
     internal: true
   public:
-
-volumes:
-  sqlserver-data:
-  neo4j-data:
